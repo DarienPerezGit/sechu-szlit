@@ -1,2 +1,25 @@
+# Dependencies
+node_modules/
+
+# Local env / secrets
+.env
+.env.local
+
+# Build output
+dist/
+apps/web/dist/
+
+# Stray tsc/tsx artifacts emitted into packages/db/src
+packages/db/src/**/*.js
+packages/db/src/**/*.js.map
+packages/db/src/**/*.d.ts
+packages/db/src/**/*.d.ts.map
+
 # Local Pi runtime state
 .atl/
+.pi-subagents/
+
+# Agent / IDE local state
+.agents/
+.claude/
+skills-lock.json

@@ -1,0 +1,32 @@
+{
+  "name": "sechub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sistema de gestión para estudios jurídicos laborales — SECHUB",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter api dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r build && pnpm -r typecheck",
+    "test": "pnpm -r build && pnpm -r test",
+    "test:api": "pnpm --filter api test",
+    "test:db": "pnpm -r build && pnpm --filter db test",
+    "test:with-docker": "docker compose up -d postgres && pnpm test; docker compose down",
+    "db:migrate": "pnpm --filter db migrate",
+    "db:generate": "pnpm --filter db generate",
+    "db:studio": "pnpm --filter db studio",
+    "docker:up": "docker compose up -d postgres",
+    "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "@neondatabase/serverless": "^1.1.0",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@10.32.1"
+}

@@ -8,75 +8,79 @@ Sistema de gestión para estudios jurídicos laborales: unifica agenda de audien
 
 ```bash
 git clone <repo> && cd sechub
-cp .env.example .env
-docker compose up -d        # levanta Postgres + Redis
 pnpm install
+npx neonctl@latest init      # autentica contra Neon y genera .env.local con DATABASE_URL
 pnpm db:migrate
 pnpm dev
 ```
 
-La API queda arriba en `http://localhost:3000`. El frontend PWA sirve desde `apps/web` en `http://localhost:5173`.
+La app queda arriba en `http://localhost:3000` (Fastify sirviendo tanto la API REST en `/api/*` como el frontend estático).
+
+**Alternativa local con Docker** (sin Neon): `docker compose up -d postgres`, copiar `.env.example` a `.env.local` y ajustar `DATABASE_URL`.
 
 ## Qué resuelve
 
 Los estudios de derecho laboral llevan agenda, legajos y liquidaciones en sistemas sueltos (planillas, Drive, calculadoras aparte). SECHUB centraliza todo: una carátula genera automáticamente audiencia + carpeta de caso, un acta entrante actualiza el estado del caso solo, y las liquidaciones se precargan desde la carátula con la normativa laboral argentina (LCT, LNE, ley 25.323) ya codificada.
 
-El caso, además, sigue un pipeline real por sectores: **Comunicaciones** (intake, decide si se toma) → **SECLO** (negociación) → si concilia, se archiva; si no, pasa por **Redacción** y **Procesal**. En paralelo puede abrirse un reclamo de **Accidentes**. Por fuera de este flujo hay dos verticales independientes: **Mediaciones civiles** (reclamos menores) y **Empleadores** (defensa cuando el cliente es la empresa).
+El legajo operativo principal es la **Carpeta** (sinónimo de Caso en este dominio). Esta se mueve por un pipeline de sectores:
+- **Comunicaciones** (intake, decide si se toma) → **SECLO** (negociación) → **Redacción** → **Procesal**.
+- **Accidentes** corre como una vertical separada (reclamos ante comisiones médicas de la SRT contra la ART, circuito procesal independiente).
+- **Mediaciones civiles** (reclamos menores, reutiliza la estructura de Carpeta pero en un sector aislado).
+- **Empleadores** (defensa de clientes recurrentes, ficha liviana de cliente vinculable a Carpetas vía FK manual).
 
 ## Arquitectura
 
 ```
-Frontend PWA ──▶ API REST ──▶ PostgreSQL (tenant_id + RLS)
-                    │              ▲
-Gmail/Calendar ──▶ Workers ────────┘
-   (OAuth por tenant, polling cada 30 min)
+                       app.estudioszlit.com.ar
+                  ┌───────────────────────────────┐
+                  │  Fastify Monolith             │
+Frontend estático ┼─▶ API REST ─▶ Drizzle ORM     │ ──▶ PostgreSQL (Postgres 18)
+                  │                  │            │       (estudio_id tenant-ready)
+                  │             graphile-worker ──┼───▶ Gmail/Calendar API
+                  └───────────────────────────────┘       (OAuth por casilla)
 ```
 
-- **API**: Node.js/TypeScript (Fastify), stateless, JWT con claim `tenant_id`.
-- **Workers**: BullMQ + Redis. Escanean Gmail y sincronizan Calendar por tenant.
-- **DB**: PostgreSQL. Multi-tenant vía `tenant_id` en cada tabla + Row-Level Security — el aislamiento entre estudios se garantiza a nivel de motor de base de datos, no solo en el código de la API.
-
-**Decisiones no obvias:**
-- *Polling de Gmail cada 30 min, no push/webhooks*: Gmail push requiere Pub/Sub y verificación de dominio; para un caso de uso de agenda diaria (no tiempo real), polling es más simple de operar y suficiente.
-- *RLS desde el día uno aunque hoy hay un solo tenant*: agregarlo después de tener datos reales de un estudio (legajos, montos, conciliadores) es una re-arquitectura, no un refactor. El costo extra ahora es ~15-20%.
-- *Un solo servicio Node, no microservicios*: a esta escala (10 usuarios, pocos tenants) separar servicios agrega complejidad operativa sin beneficio real.
-- *Roles por sector, no Admin/Usuario binario*: el estudio necesita administradores con edición total y responsables que solo editan los casos de su sector (comunicaciones, SECLO, redacción, procesal, accidentes). El schema de permisos se modela desde el arranque como rol + sector, no como un flag booleano.
-- *El worker de mail lee varias casillas, no una sola*: cada sector usa su propia cuenta de Gmail/Hotmail. El `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` del `.env` siguen siendo uno solo (es la app registrada en Google Cloud); lo que cambia por casilla es el token de autorización, que se guarda en una tabla (`cuentas_mail`) y no en variables de entorno.
-
-Ver `docs/SECHUB-BACKEND-SPEC.md` para el detalle de las 17 tablas y `docs/adr/` para decisiones futuras.
+- **Monolito**: Un solo deploy y dominio (`app.estudioszlit.com.ar`), sin CORS. Fastify sirve la API en `/api/*` y el frontend estático compilado vía `@fastify/static`.
+- **Sesión**: Cookies de sesión más seguras (`httpOnly` + `SameSite=Strict`). Autenticación local mediante email y contraseña propia.
+- **Workers**: Ejecución en segundo plano vía **graphile-worker** directamente sobre Postgres (sin Redis). Tareas de polling de Gmail/Calendar cada 30 minutos.
+- **ORM**: Drizzle ORM con migraciones SQL explícitas y control directo de transacciones.
+- **DB (Aislamiento)**: PostgreSQL. Diseño "tenant-ready" con columna `estudio_id` (not null + FK) e índices compuestos empezando por `estudio_id` en todas las tablas núcleo. Tipado en TypeScript que exige `estudio_id` a nivel de compilación en toda query. Row-Level Security (RLS) diferido: políticas pre-nombradas (`{tabla}_estudio_isolation`) pero desactivadas en producción inicial al ser hoy monotenant.
+- **Concurrencia**: Bloqueo optimista (`version` integer) sobre la fila de `carpetas`. Tareas del checklist en tabla separada para evitar falsos conflictos. Retorna `409 Conflict` con "la carpeta cambió, recargá".
+- **Liquidaciones**: Parámetros legales (`parametros_legales`) modelados con vigencia temporal (`valido_desde`/`valido_hasta`) y restricción de exclusión GiST contra solapamientos. Fórmula en código TS y snapshot inmutable `parametros_usados` (jsonb) en cada liquidación para auditoría legal.
+- **Actas**: Tabla `actas` con expediente nullable y no-único (múltiples actas por expediente). Vínculo con carpetas por `carpeta_id` nullable (flujo de huérfanos). Transicionar `carpeta_id` de NULL a un valor corre en una transacción única los efectos secundarios (cambio de estado de carpeta, actualización de audiencias, log en bitácora).
+- **Audiencias**: Agenda diaria con `carpeta_id` nullable (permite bloquear fechas sin carátula final). Audiencias sin carpeta son editables por cualquiera; al asociarse, heredan restricciones de sector del caso.
 
 ## Requisitos / setup local
 
 - Node.js 20+, pnpm 9+
-- Docker (Postgres 16 + Redis 7 vía `docker-compose.yml`)
-- Credenciales OAuth de Google Cloud (Gmail API + Calendar API) por tenant
+- Base de datos PostgreSQL 18:
+  - **Neon** (recomendado para dev/scratch): `npx neonctl@latest init` genera `.env.local` con `DATABASE_URL`. Elegido sobre Supabase porque Neon es Postgres puro sin capa de API pública (PostgREST) que expondría cada tabla nueva salvo RLS activo por tabla.
+  - **Docker local** (alternativa): `docker compose up -d postgres` (Postgres 18-alpine) y usar la `DATABASE_URL` de `.env.example`.
+- Credenciales OAuth de Google Cloud (Gmail API + Calendar API) por cuenta del estudio (requerido solo para el worker de mail, fase posterior)
 
-Variables de entorno (`.env.example`):
+Variables de entorno (`.env.example` como plantilla; `.env` y `.env.local` están en `.gitignore`):
 
 ```bash
 DATABASE_URL=postgresql://user:pass@localhost:5432/sechub
-REDIS_URL=redis://localhost:6379
-JWT_SECRET=
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GOOGLE_REDIRECT_URI=
+COOKIE_SECRET=change-me-in-production-minimum-32-characters-long
+NODE_ENV=development
+PORT=3000
 ```
+
+> **Aviso de datos:** la base de dev/scratch (Neon o Docker local) no debe contener datos reales del Estudio Szlit — solo expedientes y usuarios de prueba.
 
 ## Estructura de carpetas
 
 ```
 sechub/
 ├── apps/
-│   ├── api/          # REST API (Fastify)
-│   ├── workers/       # Jobs de Gmail/Calendar (BullMQ)
-│   └── web/           # Frontend PWA
+│   ├── api/          # Monolito Fastify (API + Static Frontend)
+│   └── web/          # Frontend estático
 ├── packages/
-│   ├── db/            # Schema, migraciones, policies RLS
-│   └── shared/         # Tipos y validaciones compartidas
+│   └── db/           # Drizzle ORM, schema, migraciones SQL
 ├── docs/
-│   ├── SECHUB-BACKEND-SPEC.md
-│   └── adr/            # Architecture Decision Records
-├── docker-compose.yml   # Postgres + Redis local
+│   ├── adr/          # Architecture Decision Records (ADRs)
+│   └── agents/       # Issue tracker, triage, domain docs config
 └── .env.example
 ```
 
@@ -84,12 +88,15 @@ sechub/
 
 ```bash
 pnpm test              # unit + integration
-pnpm test:e2e          # flujo completo (carátula → carpeta → audiencia)
 ```
+
+> Nota: los tests de integración corren contra PostgreSQL 18 (Neon o Docker local). No se simulan múltiples tenants aún (eso viene con los tickets de permisos).
 
 ## Deploy / CI-CD
 
-Deploy inicial en Railway (Postgres + Redis + API + workers), HTTPS automático para la PWA. Pipeline: push a `main` corre lint + tests, deploy automático si pasan.
+Despliegue en Railway (Postgres gestionado + servicio web monolito con worker en el mismo proceso o worker liviano dedicado, desactivado el sleep por inactividad). Respaldos automáticos de la plataforma complementados con un job de respaldo diario (`pg_dump`) hacia un bucket externo S3/Backblaze B2. Entornos aislados basados en branches (staging y producción) desde el primer día.
+
+Residencia de datos (Ley 25.326) gobernada por consentimiento y cláusulas de transferencia internacional en el formulario de contratación (etapa Comunicaciones), no por región de nube.
 
 ## Contributing
 
