@@ -5,7 +5,7 @@ import { createDatabase, runMigrations } from "@sechub/db";
 import { buildApp } from "./app.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const envDir = join(__dirname, "..", "..");
+const envDir = join(__dirname, "..", "..", "..");
 config({ path: join(envDir, ".env") });
 config({ path: join(envDir, ".env.local"), override: true });
 

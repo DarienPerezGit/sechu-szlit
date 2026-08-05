@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Database } from "@sechub/db";
 import { authRoutes } from "./routes/auth.js";
+import { catalogosRoutes } from "./routes/catalogos.js";
 
 export interface AppDependencies {
   db: Database;
@@ -46,6 +47,11 @@ export async function buildApp(deps: AppDependencies) {
     prefix: "/api/auth",
     db: deps.db,
     isProduction,
+  });
+
+  app.register(catalogosRoutes, {
+    prefix: "/api",
+    db: deps.db,
   });
 
   return app;
