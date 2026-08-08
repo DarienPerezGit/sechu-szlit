@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS "carpetas_estudio_estado_idx" ON "carpetas" USING btree ("estudio_id","estado_caso_id");

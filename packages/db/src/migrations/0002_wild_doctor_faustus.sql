@@ -1,0 +1,2 @@
+CREATE INDEX IF NOT EXISTS "bitacora_carpetas_carpeta_idx" ON "bitacora_carpetas" USING btree ("carpeta_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "bitacora_carpetas_usuario_idx" ON "bitacora_carpetas" USING btree ("usuario_id");

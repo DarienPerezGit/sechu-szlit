@@ -2,25 +2,17 @@ import argon2 from "argon2";
 import type { FastifyInstance } from "fastify";
 import { eq, lt } from "drizzle-orm";
 import { type Database, sessions, usuarios } from "@sechub/db";
-
-const SESSION_COOKIE_NAME = "sessionId";
-const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+import {
+  SESSION_COOKIE_NAME,
+  SESSION_DURATION_MS,
+  UUID_REGEX,
+  cookieOptions,
+  getAuthenticatedUser,
+} from "../utils/auth.js";
 
 export interface AuthPluginOptions {
   db: Database;
   isProduction: boolean;
-}
-
-function cookieOptions(isProduction: boolean, expires?: Date) {
-  return {
-    httpOnly: true,
-    sameSite: "strict" as const,
-    path: "/",
-    secure: isProduction,
-    signed: true,
-    ...(expires ? { expires } : {}),
-  };
 }
 
 function serializeUser(user: {
@@ -93,41 +85,8 @@ export async function authRoutes(
   });
 
   app.get("/me", async (request, reply) => {
-    const cookieVal = request.cookies[SESSION_COOKIE_NAME];
-    if (!cookieVal) {
-      return reply.status(401).send({ error: "No autenticado" });
-    }
-
-    const unsigned = request.unsignCookie(cookieVal);
-    if (!unsigned.valid || !unsigned.value) {
-      return reply.status(401).send({ error: "Sesión inválida" });
-    }
-
-    const sessionId = unsigned.value;
-    if (!UUID_REGEX.test(sessionId)) {
-      return reply.status(401).send({ error: "Sesión inválida" });
-    }
-
-    const now = new Date();
-    const [session] = await db
-      .select()
-      .from(sessions)
-      .where(eq(sessions.id, sessionId))
-      .limit(1);
-
-    if (!session || session.expiresAt <= now) {
-      return reply.status(401).send({ error: "Sesión inválida" });
-    }
-
-    const [user] = await db
-      .select()
-      .from(usuarios)
-      .where(eq(usuarios.id, session.usuarioId))
-      .limit(1);
-
-    if (!user) {
-      return reply.status(401).send({ error: "Usuario no encontrado" });
-    }
+    const user = await getAuthenticatedUser(request, reply, db);
+    if (!user) return;
 
     return reply.status(200).send({ user: serializeUser(user) });
   });

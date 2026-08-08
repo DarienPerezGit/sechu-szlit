@@ -8,7 +8,7 @@
     "dev": "pnpm --filter api dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r build && pnpm -r typecheck",
-    "test": "pnpm -r build && pnpm -r test",
+    "test": "pnpm -r build && pnpm -r --concurrency=1 test",
     "test:api": "pnpm --filter api test",
     "test:db": "pnpm -r build && pnpm --filter db test",
     "test:with-docker": "docker compose up -d postgres && pnpm test; docker compose down",
