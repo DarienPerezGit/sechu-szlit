@@ -8,6 +8,27 @@
       "when": 1785890780640,
       "tag": "0000_aberrant_dakota_north",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1786056343428,
+      "tag": "0001_thankful_meggan",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786057345805,
+      "tag": "0002_wild_doctor_faustus",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786159581961,
+      "tag": "0003_wealthy_iron_monger",
+      "breakpoints": true
     }
   ]
 }
