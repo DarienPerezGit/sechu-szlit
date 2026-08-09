@@ -130,7 +130,13 @@ export async function audienciasRoutes(
         tipoColor: tiposAudiencia.color,
       })
       .from(audiencias)
-      .leftJoin(carpetas, eq(audiencias.carpetaId, carpetas.id))
+      .leftJoin(
+        carpetas,
+        and(
+          eq(audiencias.carpetaId, carpetas.id),
+          eq(carpetas.estudioId, user.estudioId),
+        ),
+      )
       .leftJoin(usuarios, eq(audiencias.abogadoId, usuarios.id))
       .leftJoin(tiposAudiencia, eq(audiencias.tipoAudienciaId, tiposAudiencia.id))
       .where(
