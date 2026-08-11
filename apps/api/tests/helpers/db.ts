@@ -1,5 +1,5 @@
 import argon2 from "argon2";
-import { createDatabase, runMigrations, type Database, estudios, sessions, usuarios, carpetas, bitacoraCarpetas, empleadores } from "@sechub/db";
+import { createDatabase, runMigrations, type Database, estudios, sessions, usuarios, carpetas, bitacoraCarpetas, empleadores, audiencias } from "@sechub/db";
 
 export function getDatabaseUrl(): string {
   return (
@@ -46,6 +46,7 @@ export async function seedUser(
 }
 
 export async function resetDatabase(db: Database): Promise<void> {
+  await db.delete(audiencias);
   await db.delete(bitacoraCarpetas);
   await db.delete(carpetas);
   await db.delete(empleadores);

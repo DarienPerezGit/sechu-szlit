@@ -29,6 +29,13 @@
       "when": 1786159581961,
       "tag": "0003_wealthy_iron_monger",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786236933851,
+      "tag": "0004_brief_mesmero",
+      "breakpoints": true
     }
   ]
 }

@@ -7,6 +7,7 @@ import { type Database } from "@sechub/db";
 import { authRoutes } from "./routes/auth.js";
 import { catalogosRoutes } from "./routes/catalogos.js";
 import { carpetasRoutes } from "./routes/carpetas.js";
+import { audienciasRoutes } from "./routes/audiencias.js";
 
 export interface AppDependencies {
   db: Database;
@@ -56,6 +57,11 @@ export async function buildApp(deps: AppDependencies) {
   });
 
   app.register(carpetasRoutes, {
+    prefix: "/api",
+    db: deps.db,
+  });
+
+  app.register(audienciasRoutes, {
     prefix: "/api",
     db: deps.db,
   });
