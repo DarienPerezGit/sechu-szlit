@@ -91,6 +91,9 @@ describe("audiencias schema", () => {
     const db = createDatabase(getDatabaseUrl());
     await runMigrations(db);
 
+    // Clean up residual audiencias from previous runs on shared DB
+    await db.delete(audiencias);
+
     const [estudio] = await db.select().from(estudios).limit(1);
     const [tipo] = await db
       .select()
