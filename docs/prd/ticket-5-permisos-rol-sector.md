@@ -79,6 +79,10 @@ El sistema requiere un control de accesos granular para evitar que los usuarios 
 * Acciones administrativas avanzadas de "reclamar carpeta" para forzar transiciones de sector por parte de no responsables (a definir con el cliente).
 * Interfaz de usuario para la gestión o asignación de roles y sectores a los usuarios.
 
+## Implementation Note
+
+No se agregó un `PATCH /api/audiencias/:id` genérico porque no existe una ruta pública actual que lo requiera. Las reglas se aplican a los endpoints de escritura existentes: `POST /api/audiencias` valida el sector de una carpeta cuando la audiencia nace vinculada y `PATCH /api/audiencias/:id/vincular` aplica la regla según el estado actual de la audiencia. Una audiencia huérfana puede vincularse por cualquier responsable de sector; una vez vinculada, futuros intentos de escritura sobre esa audiencia requieren responsabilidad sobre el sector actual de su carpeta.
+
 ## Further Notes
 
 Ninguna.

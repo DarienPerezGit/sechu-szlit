@@ -9,6 +9,12 @@ import {
   bitacoraCarpetas,
 } from "@sechub/db";
 import { getAuthenticatedUser, UUID_REGEX } from "../utils/auth.js";
+import {
+  canWriteSector,
+  getWriteAuthorization,
+  requireWriteAuthorization,
+  sendForbidden,
+} from "../authorization.js";
 
 export interface AudienciasPluginOptions {
   db: Database;
@@ -49,10 +55,10 @@ async function checkCarpetaOwnership(
   carpetaId: string,
   estudioId: string,
   reply: FastifyReply,
-): Promise<boolean> {
+): Promise<typeof carpetas.$inferSelect | null> {
   if (!UUID_REGEX.test(carpetaId)) {
     reply.status(400).send({ error: "ID de carpeta inválido" });
-    return false;
+    return null;
   }
 
   const [carpeta] = await db
@@ -68,10 +74,10 @@ async function checkCarpetaOwnership(
 
   if (!carpeta) {
     reply.status(400).send({ error: "La carpeta especificada no existe o no pertenece a su estudio" });
-    return false;
+    return null;
   }
 
-  return true;
+  return carpeta;
 }
 
 export async function audienciasRoutes(
@@ -163,6 +169,7 @@ export async function audienciasRoutes(
       notasInternas?: string | null;
     };
   }>("/audiencias", {
+    preValidation: requireWriteAuthorization(db),
     schema: {
       body: {
         type: "object",
@@ -180,8 +187,7 @@ export async function audienciasRoutes(
       },
     },
   }, async (request, reply) => {
-    const user = await getAuthenticatedUser(request, reply, db);
-    if (!user) return;
+    const { user, authorization } = getWriteAuthorization(request);
 
     const {
       carpetaId,
@@ -219,10 +225,14 @@ export async function audienciasRoutes(
       return reply.status(400).send({ error: "El tipo de audiencia especificado no existe" });
     }
 
-    // Validate carpeta ownership if provided
+    // Validate carpeta ownership and responsible-sector access if provided.
     if (carpetaId) {
-      const carpetaOk = await checkCarpetaOwnership(db, carpetaId, user.estudioId, reply);
-      if (!carpetaOk) return;
+      const carpeta = await checkCarpetaOwnership(db, carpetaId, user.estudioId, reply);
+      if (!carpeta) return;
+
+      if (!canWriteSector(authorization, carpeta.sectorActualId)) {
+        return sendForbidden(reply);
+      }
     }
 
     const [audiencia] = await db
@@ -248,6 +258,7 @@ export async function audienciasRoutes(
     Params: { id: string };
     Body: { carpetaId: string };
   }>("/audiencias/:id/vincular", {
+    preValidation: requireWriteAuthorization(db),
     schema: {
       body: {
         type: "object",
@@ -258,8 +269,7 @@ export async function audienciasRoutes(
       },
     },
   }, async (request, reply) => {
-    const user = await getAuthenticatedUser(request, reply, db);
-    if (!user) return;
+    const { user, authorization } = getWriteAuthorization(request);
 
     const { id } = request.params;
     const { carpetaId } = request.body;
@@ -284,14 +294,28 @@ export async function audienciasRoutes(
       return reply.status(404).send({ error: "Audiencia no encontrada" });
     }
 
-    // Check not already linked
+    // Linked audiencias remain writable only by their carpeta's current sector.
     if (audiencia.carpetaId !== null) {
+      const [linkedCarpeta] = await db
+        .select()
+        .from(carpetas)
+        .where(
+          and(
+            eq(carpetas.id, audiencia.carpetaId),
+            eq(carpetas.estudioId, user.estudioId),
+          ),
+        )
+        .limit(1);
+      if (!linkedCarpeta || !canWriteSector(authorization, linkedCarpeta.sectorActualId)) {
+        return sendForbidden(reply);
+      }
+
       return reply.status(400).send({ error: "La audiencia ya está vinculada a una carpeta" });
     }
 
     // Validate target carpeta ownership
-    const carpetaOk = await checkCarpetaOwnership(db, carpetaId, user.estudioId, reply);
-    if (!carpetaOk) return;
+    const carpeta = await checkCarpetaOwnership(db, carpetaId, user.estudioId, reply);
+    if (!carpeta) return;
 
     // Link in a transaction with bitacora
     try {
