@@ -1,5 +1,6 @@
 export * from "./estudios.js";
 export * from "./usuarios.js";
+export * from "./roles.js";
 export * from "./sessions.js";
 export * from "./catalogos.js";
 export * from "./empleadores.js";

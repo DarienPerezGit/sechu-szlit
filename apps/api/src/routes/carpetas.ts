@@ -2,6 +2,12 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { eq, and } from "drizzle-orm";
 import { type Database, carpetas, bitacoraCarpetas, empleadores } from "@sechub/db";
 import { getAuthenticatedUser, UUID_REGEX, PG_UNIQUE_VIOLATION } from "../utils/auth.js";
+import {
+  canWriteSector,
+  getWriteAuthorization,
+  requireWriteAuthorization,
+  sendForbidden,
+} from "../authorization.js";
 
 export interface CarpetasPluginOptions {
   db: Database;
@@ -99,6 +105,7 @@ export async function carpetasRoutes(
       empleadorId?: string | null;
     };
   }>("/carpetas", {
+    preValidation: requireWriteAuthorization(db),
     schema: {
       body: {
         type: "object",
@@ -114,10 +121,11 @@ export async function carpetasRoutes(
       },
     },
   }, async (request, reply) => {
-    const user = await getAuthenticatedUser(request, reply, db);
-    if (!user) return;
-
+    const { user, authorization } = getWriteAuthorization(request);
     const { sectorActualId, estadoCasoId, expediente, caratula, demandada, empleadorId } = request.body;
+    if (!canWriteSector(authorization, sectorActualId)) {
+      return sendForbidden(reply);
+    }
 
     const hasOwnership = await checkEmpleadorOwnership(db, empleadorId, user.estudioId, reply);
     if (!hasOwnership) return;
@@ -168,6 +176,7 @@ export async function carpetasRoutes(
       empleadorId?: string | null;
     };
   }>("/carpetas/:id", {
+    preValidation: requireWriteAuthorization(db),
     schema: {
       body: {
         type: "object",
@@ -184,18 +193,13 @@ export async function carpetasRoutes(
       },
     },
   }, async (request, reply) => {
-    const user = await getAuthenticatedUser(request, reply, db);
-    if (!user) return;
-
+    const { user, authorization } = getWriteAuthorization(request);
     const { id } = request.params;
     if (!UUID_REGEX.test(id)) {
       return reply.status(400).send({ error: "ID inválido" });
     }
 
     const { version, sectorActualId, estadoCasoId, expediente, caratula, demandada, empleadorId } = request.body;
-
-    const hasOwnership = await checkEmpleadorOwnership(db, empleadorId, user.estudioId, reply);
-    if (!hasOwnership) return;
 
     // Prevent mass assignment: construct sanitized update fields
     const updateFields: any = {};
@@ -215,6 +219,13 @@ export async function carpetasRoutes(
     if (!existing) {
       return reply.status(404).send({ error: "Carpeta no encontrada" });
     }
+
+    if (!canWriteSector(authorization, existing.sectorActualId)) {
+      return sendForbidden(reply);
+    }
+
+    const hasOwnership = await checkEmpleadorOwnership(db, empleadorId, user.estudioId, reply);
+    if (!hasOwnership) return;
 
     if (existing.version !== version) {
       return reply.status(409).send({ error: "la carpeta cambió, recargá" });

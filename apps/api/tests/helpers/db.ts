@@ -1,5 +1,20 @@
 import argon2 from "argon2";
-import { createDatabase, runMigrations, type Database, estudios, sessions, usuarios, carpetas, bitacoraCarpetas, empleadores, audiencias } from "@sechub/db";
+import { sql } from "drizzle-orm";
+import {
+  ROLE_CODES,
+  createDatabase,
+  runMigrations,
+  type Database,
+  type RoleCode,
+  estudios,
+  sessions,
+  usuarios,
+  carpetas,
+  bitacoraCarpetas,
+  empleadores,
+  audiencias,
+} from "@sechub/db";
+import { runMigrations as runPermissionMigrations } from "../../../../packages/db/src/migrate.js";
 
 export function getDatabaseUrl(): string {
   return (
@@ -11,6 +26,7 @@ export function getDatabaseUrl(): string {
 export async function createTestDatabase(): Promise<Database> {
   const db = createDatabase(getDatabaseUrl());
   await runMigrations(db);
+  await runPermissionMigrations(db);
   return db;
 }
 
@@ -19,7 +35,7 @@ export async function seedUser(
   overrides: {
     email?: string;
     password?: string;
-    role?: string;
+    role?: RoleCode;
   } = {},
 ): Promise<{ email: string; password: string; estudioId: string }> {
   const [estudio] = await db.select().from(estudios).limit(1);
@@ -29,7 +45,7 @@ export async function seedUser(
 
   const email = overrides.email ?? "test@estudioszlit.com.ar";
   const password = overrides.password ?? "Secr3tP@ss";
-  const role = overrides.role ?? "admin";
+  const role = overrides.role ?? ROLE_CODES.ADMIN;
 
   const passwordHash = await argon2.hash(password);
   const [user] = await db
@@ -42,6 +58,14 @@ export async function seedUser(
     })
     .returning();
 
+  await db.execute(sql`
+    INSERT INTO usuarios_roles (usuario_id, rol_id)
+    SELECT ${user.id}, roles.id
+    FROM roles
+    WHERE roles.codigo = ${role}
+    ON CONFLICT (usuario_id, rol_id) DO NOTHING
+  `);
+
   return { email, password, estudioId: user.estudioId };
 }
 
@@ -51,5 +75,7 @@ export async function resetDatabase(db: Database): Promise<void> {
   await db.delete(carpetas);
   await db.delete(empleadores);
   await db.delete(sessions);
+  await db.execute(sql`DELETE FROM usuarios_roles`);
+  await db.execute(sql`DELETE FROM usuarios_sectores`);
   await db.delete(usuarios);
 }
