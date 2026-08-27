@@ -4,6 +4,7 @@ import Fastify from "fastify";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Database } from "@sechub/db";
+import { actasRoutes } from "./routes/actas.js";
 import { authRoutes } from "./routes/auth.js";
 import { catalogosRoutes } from "./routes/catalogos.js";
 import { carpetasRoutes } from "./routes/carpetas.js";
@@ -62,6 +63,11 @@ export async function buildApp(deps: AppDependencies) {
   });
 
   app.register(audienciasRoutes, {
+    prefix: "/api",
+    db: deps.db,
+  });
+
+  app.register(actasRoutes, {
     prefix: "/api",
     db: deps.db,
   });

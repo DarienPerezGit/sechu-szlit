@@ -13,6 +13,7 @@ import {
   bitacoraCarpetas,
   empleadores,
   audiencias,
+  actas,
 } from "@sechub/db";
 import { runMigrations as runPermissionMigrations } from "../../../../packages/db/src/migrate.js";
 
@@ -70,6 +71,7 @@ export async function seedUser(
 }
 
 export async function resetDatabase(db: Database): Promise<void> {
+  await db.delete(actas);
   await db.delete(audiencias);
   await db.delete(bitacoraCarpetas);
   await db.delete(carpetas);

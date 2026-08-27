@@ -1,6 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
-import { type Database, sectores, estadosCaso, tiposAudiencia } from "@sechub/db";
+import {
+  type Database,
+  estadosActa,
+  estadosCaso,
+  sectores,
+  tiposActa,
+  tiposAudiencia,
+} from "@sechub/db";
 
 export interface CatalogosPluginOptions {
   db: Database;
@@ -36,6 +43,24 @@ export async function catalogosRoutes(
       .from(tiposAudiencia)
       .where(eq(tiposAudiencia.activo, true))
       .orderBy(tiposAudiencia.id);
+    return reply.status(200).send(data);
+  });
+
+  app.get("/tipos-acta", async (request, reply) => {
+    const data = await db
+      .select()
+      .from(tiposActa)
+      .where(eq(tiposActa.activo, true))
+      .orderBy(tiposActa.id);
+    return reply.status(200).send(data);
+  });
+
+  app.get("/estados-acta", async (request, reply) => {
+    const data = await db
+      .select()
+      .from(estadosActa)
+      .where(eq(estadosActa.activo, true))
+      .orderBy(estadosActa.id);
     return reply.status(200).send(data);
   });
 }
