@@ -6,3 +6,4 @@ export * from "./catalogos.js";
 export * from "./empleadores.js";
 export * from "./carpetas.js";
 export * from "./audiencias.js";
+export * from "./actas.js";

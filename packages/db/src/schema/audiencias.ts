@@ -5,6 +5,11 @@ import { carpetas } from "./carpetas.js";
 import { usuarios } from "./usuarios.js";
 import { tiposAudiencia } from "./catalogos.js";
 
+export const AUDIENCIA_STATUS_CODES = {
+  PENDIENTE: "pendiente",
+  REALIZADA: "realizada",
+} as const;
+
 export const audiencias = pgTable("audiencias", {
   id: uuid("id")
     .default(sql`uuidv7()`)
@@ -25,6 +30,7 @@ export const audiencias = pgTable("audiencias", {
   linkReunion: text("link_reunion"),
   linkDetalle: text("link_detalle"),
   notasInternas: text("notas_internas"),
+  estado: text("estado").default(AUDIENCIA_STATUS_CODES.PENDIENTE).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -41,6 +47,10 @@ export const audiencias = pgTable("audiencias", {
     estudioCarpetaIdx: index("audiencias_estudio_carpeta_idx").on(
       table.estudioId,
       table.carpetaId,
+    ),
+    estudioEstadoIdx: index("audiencias_estudio_estado_idx").on(
+      table.estudioId,
+      table.estado,
     ),
   };
 });

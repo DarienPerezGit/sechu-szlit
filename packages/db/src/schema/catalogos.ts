@@ -24,6 +24,20 @@ export const tiposAudiencia = pgTable("tipos_audiencia", {
   activo: boolean("activo").default(true).notNull(),
 });
 
+export const tiposActa = pgTable("tipos_acta", {
+  id: serial("id").primaryKey(),
+  codigo: varchar("codigo", { length: 100 }).notNull().unique(),
+  nombre: varchar("nombre", { length: 255 }).notNull(),
+  activo: boolean("activo").default(true).notNull(),
+});
+
+export const estadosActa = pgTable("estados_acta", {
+  id: serial("id").primaryKey(),
+  codigo: varchar("codigo", { length: 100 }).notNull().unique(),
+  nombre: varchar("nombre", { length: 255 }).notNull(),
+  activo: boolean("activo").default(true).notNull(),
+});
+
 export type Sector = typeof sectores.$inferSelect;
 export type NewSector = typeof sectores.$inferInsert;
 
@@ -32,3 +46,9 @@ export type NewEstadoCaso = typeof estadosCaso.$inferInsert;
 
 export type TipoAudiencia = typeof tiposAudiencia.$inferSelect;
 export type NewTipoAudiencia = typeof tiposAudiencia.$inferInsert;
+
+export type TipoActa = typeof tiposActa.$inferSelect;
+export type NewTipoActa = typeof tiposActa.$inferInsert;
+
+export type EstadoActa = typeof estadosActa.$inferSelect;
+export type NewEstadoActa = typeof estadosActa.$inferInsert;
