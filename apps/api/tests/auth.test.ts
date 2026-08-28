@@ -98,6 +98,39 @@ describe("authentication API", async () => {
     expect(response.statusCode).toBe(401);
   });
 
+  it("exposes the normalized role from /api/auth/me instead of the legacy scalar", async () => {
+    const app = await createApp();
+    const { email, password } = await seedUser(db, {
+      email: `normalized-role-${Date.now()}@test.com`,
+    });
+    const [user] = await db.select().from(usuarios).where(eq(usuarios.email, email)).limit(1);
+
+    await db
+      .update(usuarios)
+      .set({ role: "lectura" })
+      .where(eq(usuarios.id, user.id));
+
+    const loginResponse = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email, password },
+    });
+    const cookie = loginResponse.headers["set-cookie"];
+    expect(cookie).toBeDefined();
+
+    const meResponse = await app.inject({
+      method: "GET",
+      url: "/api/auth/me",
+      headers: {
+        cookie: Array.isArray(cookie) ? cookie.join("; ") : cookie,
+      },
+    });
+
+    expect(meResponse.statusCode).toBe(200);
+    expect(meResponse.json().user.role).toBe("admin");
+    expect(meResponse.json().user.roles).toEqual(["admin"]);
+  });
+
   it("persists the session across subsequent requests", async () => {
     const app = await createApp();
     const { email, password } = await seedUser(db);

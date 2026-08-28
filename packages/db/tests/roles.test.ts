@@ -47,7 +47,6 @@ describe("roles schema", () => {
     const [user] = await db.insert(usuarios).values({
       email: `roles-missing-sector-${Date.now()}@test.com`,
       passwordHash: "fake-hash",
-      role: "lectura",
       estudioId: estudio.id,
     }).returning();
     createdUserIds.push(user.id);
@@ -79,7 +78,6 @@ describe("roles schema", () => {
     const [user] = await db.insert(usuarios).values({
       email: `roles-${Date.now()}@test.com`,
       passwordHash: "fake-hash",
-      role: "lectura",
       estudioId: estudio.id,
     }).returning();
     createdUserIds.push(user.id);

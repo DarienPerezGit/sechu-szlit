@@ -7,7 +7,9 @@ import {
   estudios,
   tiposAudiencia,
   usuarios,
+  usuariosRoles,
   usuariosSectores,
+  roles,
   audiencias,
 } from "../../../packages/db/src/index.js";
 import { buildApp } from "../src/app.js";
@@ -43,6 +45,76 @@ describe("permisos por rol y sector API", async () => {
     await db.insert(usuariosSectores).values({ usuarioId: user.id, sectorId });
     return user;
   }
+
+  it("uses the current normalized role assignment on the next protected request", async () => {
+    const app = await createApp();
+    const credentials = await seedUser(db, {
+      email: `role-change-${Date.now()}@test.com`,
+      role: "lectura",
+    });
+    const cookie = await loginUser(app, credentials);
+    const [sector] = await db.select().from(sectores).limit(1);
+    const [estado] = await db.select().from(estadosCaso).limit(1);
+    const [user] = await db.select().from(usuarios).where(eq(usuarios.email, credentials.email)).limit(1);
+    const [adminRole] = await db.select().from(roles).where(eq(roles.codigo, "admin")).limit(1);
+    const payload = {
+      sectorActualId: sector.id,
+      estadoCasoId: estado.id,
+      expediente: `ROLE-CHANGE-${Date.now()}`,
+      caratula: "Carpeta con rol actualizado",
+      demandada: "Demandada",
+    };
+
+    const lecturaResponse = await app.inject({
+      method: "POST",
+      url: "/api/carpetas",
+      headers: { cookie },
+      payload,
+    });
+    expect(lecturaResponse.statusCode).toBe(403);
+
+    await db.delete(usuariosRoles).where(eq(usuariosRoles.usuarioId, user.id));
+    await db.insert(usuariosRoles).values({ usuarioId: user.id, rolId: adminRole.id });
+
+    const adminResponse = await app.inject({
+      method: "POST",
+      url: "/api/carpetas",
+      headers: { cookie },
+      payload,
+    });
+    expect(adminResponse.statusCode).toBe(201);
+  });
+
+  it("ignores the legacy scalar role for protected API authorization", async () => {
+    const app = await createApp();
+    const credentials = await seedUser(db, {
+      email: `legacy-role-${Date.now()}@test.com`,
+      role: "lectura",
+    });
+    const cookie = await loginUser(app, credentials);
+    const [sector] = await db.select().from(sectores).limit(1);
+    const [estado] = await db.select().from(estadosCaso).limit(1);
+    const [user] = await db.select().from(usuarios).where(eq(usuarios.email, credentials.email)).limit(1);
+
+    await db
+      .update(usuarios)
+      .set({ role: "admin" })
+      .where(eq(usuarios.id, user.id));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/carpetas",
+      headers: { cookie },
+      payload: {
+        sectorActualId: sector.id,
+        estadoCasoId: estado.id,
+        expediente: `LEGACY-ROLE-${Date.now()}`,
+        caratula: "Carpeta sin autorización",
+        demandada: "Demandada",
+      },
+    });
+    expect(response.statusCode).toBe(403);
+  });
 
   it("allows admins to create carpetas and denies lectura writes", async () => {
     const app = await createApp();

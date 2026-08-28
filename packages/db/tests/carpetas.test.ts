@@ -22,7 +22,6 @@ describe("carpetas and bitacora schema", () => {
     const [usuario] = await db.insert(usuarios).values({
       email: `test-bitacora-${Date.now()}@test.com`,
       passwordHash: "fake-hash",
-      role: "admin",
       estudioId: estudio.id,
     }).returning();
 
