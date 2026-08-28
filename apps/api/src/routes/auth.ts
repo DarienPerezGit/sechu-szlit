@@ -1,7 +1,13 @@
 import argon2 from "argon2";
 import type { FastifyInstance } from "fastify";
 import { eq, lt } from "drizzle-orm";
-import { type Database, sessions, usuarios } from "@sechub/db";
+import {
+  type Database,
+  roles,
+  sessions,
+  usuarios,
+  usuariosRoles,
+} from "@sechub/db";
 import {
   SESSION_COOKIE_NAME,
   SESSION_DURATION_MS,
@@ -15,16 +21,26 @@ export interface AuthPluginOptions {
   isProduction: boolean;
 }
 
-function serializeUser(user: {
-  id: string;
-  email: string;
-  role: string;
-  estudioId: string;
-}) {
+async function loadUserRoles(db: Database, userId: string): Promise<string[]> {
+  const assignedRoles = await db
+    .select({ codigo: roles.codigo })
+    .from(usuariosRoles)
+    .innerJoin(roles, eq(roles.id, usuariosRoles.rolId))
+    .where(eq(usuariosRoles.usuarioId, userId))
+    .orderBy(roles.id);
+
+  return assignedRoles.map(({ codigo }) => codigo);
+}
+
+function serializeUser(
+  user: { id: string; email: string; estudioId: string },
+  assignedRoles: string[],
+) {
   return {
     id: user.id,
     email: user.email,
-    role: user.role,
+    role: assignedRoles[0],
+    roles: assignedRoles,
     estudioId: user.estudioId,
   };
 }
@@ -81,14 +97,16 @@ export async function authRoutes(
       cookieOptions(isProduction, expiresAt),
     );
 
-    return reply.status(200).send({ user: serializeUser(user) });
+    const assignedRoles = await loadUserRoles(db, user.id);
+    return reply.status(200).send({ user: serializeUser(user, assignedRoles) });
   });
 
   app.get("/me", async (request, reply) => {
     const user = await getAuthenticatedUser(request, reply, db);
     if (!user) return;
 
-    return reply.status(200).send({ user: serializeUser(user) });
+    const assignedRoles = await loadUserRoles(db, user.id);
+    return reply.status(200).send({ user: serializeUser(user, assignedRoles) });
   });
 
   app.post("/logout", async (request, reply) => {

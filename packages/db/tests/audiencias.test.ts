@@ -40,7 +40,6 @@ describe("audiencias schema", () => {
       .values({
         email: `test-aud-${Date.now()}@test.com`,
         passwordHash: "fake-hash",
-        role: "abogado",
         estudioId: estudio.id,
       })
       .returning();
@@ -106,7 +105,6 @@ describe("audiencias schema", () => {
       .values({
         email: `test-orphan-${Date.now()}@test.com`,
         passwordHash: "fake-hash",
-        role: "abogado",
         estudioId: estudio.id,
       })
       .returning();
@@ -175,7 +173,6 @@ describe("audiencias schema", () => {
       .values({
         email: `test-agenda-${Date.now()}@test.com`,
         passwordHash: "fake-hash",
-        role: "abogado",
         estudioId: estudio.id,
       })
       .returning();
@@ -231,7 +228,6 @@ describe("audiencias schema", () => {
       .values({
         email: `test-link-${Date.now()}@test.com`,
         passwordHash: "fake-hash",
-        role: "abogado",
         estudioId: estudio.id,
       })
       .returning();

@@ -54,7 +54,6 @@ export async function seedUser(
     .values({
       email,
       passwordHash,
-      role,
       estudioId: estudio.id,
     })
     .returning();
