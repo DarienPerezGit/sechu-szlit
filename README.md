@@ -14,6 +14,8 @@ pnpm db:migrate
 pnpm dev
 ```
 
+`pnpm db:migrate` es la única autoridad de migraciones para desarrollo local, CI y administración. En modo normal, una base existente sin metadata de migraciones falla cerrada y no se adopta automáticamente; la adopción explícita de legados queda deliberadamente diferida a PR 2.
+
 La app queda arriba en `http://localhost:3000` (Fastify sirviendo tanto la API REST en `/api/*` como el frontend estático).
 
 **Alternativa local con Docker** (sin Neon): `docker compose up -d postgres`, copiar `.env.example` a `.env.local` y ajustar `DATABASE_URL`.
@@ -43,7 +45,7 @@ Frontend estático ┼─▶ API REST ─▶ Drizzle ORM     │ ──▶ Postg
 - **Monolito**: Un solo deploy y dominio (`app.estudioszlit.com.ar`), sin CORS. Fastify sirve la API en `/api/*` y el frontend estático compilado vía `@fastify/static`.
 - **Sesión**: Cookies de sesión más seguras (`httpOnly` + `SameSite=Strict`). Autenticación local mediante email y contraseña propia.
 - **Workers**: Ejecución en segundo plano vía **graphile-worker** directamente sobre Postgres (sin Redis). Tareas de polling de Gmail/Calendar cada 30 minutos.
-- **ORM**: Drizzle ORM con migraciones SQL explícitas y control directo de transacciones.
+- **ORM**: Drizzle ORM con migraciones SQL explícitas y control directo de transacciones. La ejecución se realiza exclusivamente con `pnpm db:migrate`; Fastify no migra al iniciar.
 - **DB (Aislamiento)**: PostgreSQL. Diseño "tenant-ready" con columna `estudio_id` (not null + FK) e índices compuestos empezando por `estudio_id` en todas las tablas núcleo. Tipado en TypeScript que exige `estudio_id` a nivel de compilación en toda query. Row-Level Security (RLS) diferido: políticas pre-nombradas (`{tabla}_estudio_isolation`) pero desactivadas en producción inicial al ser hoy monotenant.
 - **Concurrencia**: Bloqueo optimista (`version` integer) sobre la fila de `carpetas`. Tareas del checklist en tabla separada para evitar falsos conflictos. Retorna `409 Conflict` con "la carpeta cambió, recargá".
 - **Liquidaciones**: Parámetros legales (`parametros_legales`) modelados con vigencia temporal (`valido_desde`/`valido_hasta`) y restricción de exclusión GiST contra solapamientos. Fórmula en código TS y snapshot inmutable `parametros_usados` (jsonb) en cada liquidación para auditoría legal.
