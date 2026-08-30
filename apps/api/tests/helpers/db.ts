@@ -15,7 +15,6 @@ import {
   audiencias,
   actas,
 } from "@sechub/db";
-import { runMigrations as runPermissionMigrations } from "../../../../packages/db/src/migrate.js";
 
 export function getDatabaseUrl(): string {
   return (
@@ -27,7 +26,6 @@ export function getDatabaseUrl(): string {
 export async function createTestDatabase(): Promise<Database> {
   const db = createDatabase(getDatabaseUrl());
   await runMigrations(db);
-  await runPermissionMigrations(db);
   return db;
 }
 

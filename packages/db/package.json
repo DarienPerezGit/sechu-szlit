@@ -16,7 +16,7 @@
     "copy-migrations": "node -e \"const {cpSync, existsSync, mkdirSync, rmSync} = require('node:fs'); const {join} = require('node:path'); const src = join('src', 'migrations'); const dest = join('dist', 'migrations'); if (existsSync(src)) { rmSync(dest, {recursive: true, force: true}); mkdirSync(dest, {recursive: true}); cpSync(src, dest, {recursive: true, force: true}); }\"",
     "typecheck": "tsc --noEmit",
     "generate": "drizzle-kit generate",
-    "migrate": "drizzle-kit migrate",
+    "migrate": "tsx src/migrate-cli.ts",
     "studio": "drizzle-kit studio",
     "test": "vitest run",
     "test:watch": "vitest"
