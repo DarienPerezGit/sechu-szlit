@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit",
     "generate": "drizzle-kit generate",
     "migrate": "tsx src/migrate-cli.ts",
+    "verify-legacy": "tsx src/verify-legacy-cli.ts",
     "studio": "drizzle-kit studio",
     "test": "vitest run",
     "test:watch": "vitest"

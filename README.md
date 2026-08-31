@@ -86,6 +86,10 @@ sechub/
 └── .env.example
 ```
 
+## Legacy schema verification
+
+Before PR2B adoption, run `pnpm db:verify-legacy --manifest packages/db/src/migrations/manifests/legacy-public-v1.json` as a required read-only dry run. It validates the existing `public` schema, catalogs, and role backfill invariant without writing data or migration metadata. PR2B will add atomic adoption after this prerequisite passes.
+
 ## Tests
 
 ```bash
