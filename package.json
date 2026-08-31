@@ -13,6 +13,7 @@
     "test:db": "pnpm -r build && pnpm --filter db test",
     "test:with-docker": "docker compose up -d postgres && pnpm test; docker compose down",
     "db:migrate": "pnpm --filter db migrate",
+    "db:verify-legacy": "tsx packages/db/src/verify-legacy-cli.ts",
     "db:generate": "pnpm --filter db generate",
     "db:studio": "pnpm --filter db studio",
     "docker:up": "docker compose up -d postgres",

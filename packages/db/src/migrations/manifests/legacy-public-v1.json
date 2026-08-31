@@ -1,0 +1,23 @@
+{
+  "name": "legacy-public-v1",
+  "schema": { "name": "public", "version": "0006" },
+  "migrations": [
+    { "filename": "0000_aberrant_dakota_north.sql", "sha256": "b64560671cfad81543bdb0bb88e0a0211163cecb47597c42440d0d42a36a21e9" },
+    { "filename": "0001_thankful_meggan.sql", "sha256": "b0f1b2d3b503d5e19f1a9ce766b6266eb1a32979438a9191f46277bd1810f8da" },
+    { "filename": "0002_wild_doctor_faustus.sql", "sha256": "3aa225b0d1f1b32a3b48ace7bef0f576f3c7ddc97928b8d841408d69ef7c65df" },
+    { "filename": "0003_wealthy_iron_monger.sql", "sha256": "4c1f895e3f95f95f7c4c01e0c660f9b153ef93a06cf284347be3efc94080f396" },
+    { "filename": "0004_brief_mesmero.sql", "sha256": "72cf32f4afe793d9a15d129b9b1dc49a7a600611d16aae4bd1fa553920c021aa" },
+    { "filename": "0005_role_sector_permissions.sql", "sha256": "3ecbf2dec5dd7b74befbd3b57098aeb45f6ef573c2e6900b3b940b5f822905d1" },
+    { "filename": "0006_actas_orphan_tray.sql", "sha256": "8c1448e98230df4885ed4b7fc85943b96577c52572ebb23dd9c1fd73e78dc819" }
+  ],
+  "fingerprint": "29ff5e73595834df170cb2a455727046abf46d597843f82a937355c9ec8edc5b",
+  "catalogs": {
+    "roles": ["admin", "lectura", "responsable_sector"],
+    "sectores": ["accidentes", "comunicaciones", "mediaciones_civiles", "procesal", "redaccion", "seclo"],
+    "estados_caso": ["archivado", "conciliado", "desestimado", "en_tramite"],
+    "tipos_audiencia": ["accidente", "comunicacion", "consulta", "judicial", "mediacion", "seclo"],
+    "tipos_acta": ["acuerdo", "audiencia_conciliatoria", "desistimiento", "pase_segunda_fecha"],
+    "estados_acta": ["archivada", "firmada", "pendiente"]
+  },
+  "relationship": { "scalarColumn": "role", "relation": "usuarios_roles", "roleColumn": "rol_id" }
+}
