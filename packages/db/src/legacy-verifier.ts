@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { migrationSha256 } from "./migration-utils.js";
 import type { Client } from "pg";
 
 const METADATA_TABLE = "__sechub_migrations";
@@ -10,6 +11,10 @@ const EXPECTED_MANIFEST_DIGEST = "1164e72deb5d8602c45fe0493f77a46934a76fb2b225c7
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const MANIFEST_DIR = join(MODULE_DIR, "migrations", "manifests");
 const MIGRATIONS_DIR = join(MANIFEST_DIR, "..");
+
+export type LegacyQueryClient = {
+  query(text: string): Promise<{ rows: any[] }>;
+};
 
 type Manifest = {
   name: string;
@@ -23,11 +28,6 @@ type Manifest = {
 export class LegacyVerificationError extends Error {}
 function fail(message: string): never { throw new LegacyVerificationError(message); }
 function normalizedSql(value: string): string { return value.replace(/\s+/g, " ").trim(); }
-function normalizedMigration(contents: string): string {
-  return contents.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n")
-    .split("\n").filter((line) => !line.trim().startsWith(">"))
-    .join("\n").trim() + "\n";
-}
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value !== null && typeof value === "object") {
@@ -62,11 +62,11 @@ function migrationHashes(manifest: Manifest): void {
   for (const migration of manifest.migrations) {
     const path = join(MIGRATIONS_DIR, migration.filename);
     if (!existsSync(path)) fail(`shipped migration is missing: ${migration.filename}`);
-    const actual = createHash("sha256").update(normalizedMigration(readFileSync(path, "utf8"))).digest("hex");
+    const actual = migrationSha256(readFileSync(path, "utf8"));
     if (actual !== migration.sha256) fail(`migration hash drift: ${migration.filename}`);
   }
 }
-async function fingerprint(client: Client): Promise<string> {
+async function fingerprint(client: LegacyQueryClient): Promise<string> {
   const relationRows = (await client.query(`SELECT c.oid::text AS oid, c.relname AS name, c.relkind AS kind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('r','p','v','m','f','S') AND c.relname <> '${METADATA_TABLE}' ORDER BY c.relname, c.relkind`)).rows;
   const relations = relationRows.map(({ oid: _oid, ...relation }) => relation); const scope = relationRows.map((row) => row.oid).join(",") || "0";
   const columns = (await client.query(`SELECT c.relname AS relation, a.attnum::int AS ordinal, a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type, (NOT a.attnotnull) AS nullable, COALESCE(pg_get_expr(d.adbin, d.adrelid, true), '') AS default_value FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum WHERE a.attrelid IN (${scope}) AND a.attnum > 0 AND NOT a.attisdropped ORDER BY c.relname, a.attnum`)).rows.map((row) => ({ ...row, default_value: normalizedSql(row.default_value) }));
@@ -76,25 +76,28 @@ async function fingerprint(client: Client): Promise<string> {
   const views = (await client.query(`SELECT c.relname AS name, c.relkind AS kind, pg_get_viewdef(c.oid, true) AS definition FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('v','m') ORDER BY c.relname`)).rows.map((row) => ({ ...row, definition: normalizedSql(row.definition) }));
   return createHash("sha256").update(JSON.stringify({ relations, columns, constraints, indexes, sequences, views })).digest("hex");
 }
-async function verifyCatalogs(client: Client, manifest: Manifest): Promise<void> {
+async function verifyCatalogs(client: LegacyQueryClient, manifest: Manifest): Promise<void> {
   for (const [table, expected] of Object.entries(manifest.catalogs)) {
     const actual = (await client.query(`SELECT codigo FROM public."${table}" ORDER BY codigo`)).rows.map((row) => row.codigo);
     if (JSON.stringify(actual) !== JSON.stringify([...expected].sort())) fail(`catalog drift: ${table}`);
   }
 }
 export function validateLegacyManifest(manifestPath: string): void { migrationHashes(loadManifest(manifestPath)); }
+export async function verifyLegacyState(client: LegacyQueryClient, manifestPath: string): Promise<void> {
+  const manifest = loadManifest(manifestPath); migrationHashes(manifest);
+  const metadata = await client.query(`SELECT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = '${METADATA_TABLE}') AS present`);
+  if (metadata.rows[0].present) fail("migration metadata is present; use normal migration verification");
+  const objects = await client.query(`SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('r','p','v','m','f','S') AND c.relname <> '${METADATA_TABLE}' LIMIT 1`);
+  if (objects.rows.length === 0) fail("database is empty or fresh; legacy schema is required");
+  if (await fingerprint(client) !== manifest.fingerprint) fail("public schema fingerprint drift");
+  await verifyCatalogs(client, manifest);
+  const { scalarColumn, relation, roleColumn } = manifest.relationship;
+  const relationship = await client.query(`SELECT 1 FROM public.usuarios u LEFT JOIN public.roles r ON r.codigo = u."${scalarColumn}" WHERE r.id IS NULL OR NOT EXISTS (SELECT 1 FROM public."${relation}" ur WHERE ur.usuario_id = u.id AND ur."${roleColumn}" = r.id) OR EXISTS (SELECT 1 FROM public."${relation}" ur WHERE ur.usuario_id = u.id AND (r.id IS NULL OR ur."${roleColumn}" <> r.id)) LIMIT 1`);
+  if (relationship.rows.length !== 0) fail("usuarios_roles relationship drift: scalar roles must resolve to exactly their mapping");
+}
+
 export async function verifyLegacy(client: Client, manifestPath: string): Promise<void> {
-  const manifest = loadManifest(manifestPath); migrationHashes(manifest); await client.query("BEGIN TRANSACTION READ ONLY");
-  try {
-    const metadata = await client.query(`SELECT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = '${METADATA_TABLE}') AS present`);
-    if (metadata.rows[0].present) fail("migration metadata is present; use normal migration verification");
-    const objects = await client.query("SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('r','p','v','m','f','S') AND c.relname <> $1 LIMIT 1", [METADATA_TABLE]);
-    if (objects.rowCount === 0) fail("database is empty or fresh; legacy schema is required");
-    if (await fingerprint(client) !== manifest.fingerprint) fail("public schema fingerprint drift");
-    await verifyCatalogs(client, manifest);
-    const { scalarColumn, relation, roleColumn } = manifest.relationship;
-    const relationship = await client.query(`SELECT 1 FROM public.usuarios u LEFT JOIN public.roles r ON r.codigo = u."${scalarColumn}" WHERE r.id IS NULL OR NOT EXISTS (SELECT 1 FROM public."${relation}" ur WHERE ur.usuario_id = u.id AND ur."${roleColumn}" = r.id) OR EXISTS (SELECT 1 FROM public."${relation}" ur WHERE ur.usuario_id = u.id AND (r.id IS NULL OR ur."${roleColumn}" <> r.id)) LIMIT 1`);
-    if (relationship.rowCount !== 0) fail("usuarios_roles relationship drift: scalar roles must resolve to exactly their mapping");
-    await client.query("ROLLBACK");
-  } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }
+  await client.query("BEGIN TRANSACTION READ ONLY");
+  try { await verifyLegacyState(client, manifestPath); await client.query("ROLLBACK"); }
+  catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; }
 }
