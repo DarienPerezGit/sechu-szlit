@@ -66,6 +66,9 @@ importers:
 
   apps/web:
     devDependencies:
+      '@types/node':
+        specifier: ^20.16.0
+        version: 20.19.43
       typescript:
         specifier: ^5.5.4
         version: 5.9.3
