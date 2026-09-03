@@ -14,7 +14,7 @@ pnpm db:migrate
 pnpm dev
 ```
 
-`pnpm db:migrate` es la única autoridad de migraciones para desarrollo local, CI y administración. En modo normal, una base existente sin metadata de migraciones falla cerrada y no se adopta automáticamente; la adopción explícita de legados queda deliberadamente diferida a PR 2.
+`pnpm db:migrate` es la única autoridad de migraciones para desarrollo local, CI y administración. En modo normal, una base existente sin metadata de migraciones falla cerrada y no se adopta automáticamente. Para una base legacy/current verificada, ejecutá una sola vez `pnpm db:migrate -- --adopt-existing`: comprueba el manifiesto legacy versionado y registra la metadata sin volver a ejecutar SQL; luego el modo normal queda como no-op.
 
 La app queda arriba en `http://localhost:3000` (Fastify sirviendo tanto la API REST en `/api/*` como el frontend estático).
 
@@ -88,7 +88,7 @@ sechub/
 
 ## Legacy schema verification
 
-Before PR2B adoption, run `pnpm db:verify-legacy --manifest packages/db/src/migrations/manifests/legacy-public-v1.json` as a required read-only dry run. It validates the existing `public` schema, catalogs, and role backfill invariant without writing data or migration metadata. PR2B will add atomic adoption after this prerequisite passes.
+For a read-only dry run, run `pnpm db:verify-legacy --manifest packages/db/src/migrations/manifests/legacy-public-v1.json`. It validates the existing `public` schema, catalogs, and role backfill invariant without writing data or migration metadata. After it passes, explicit adoption is `pnpm db:migrate -- --adopt-existing`; it verifies the canonical shipped manifest and records migration metadata without replaying SQL. Normal `pnpm db:migrate` never adopts a metadata-free existing schema.
 
 ## Tests
 
@@ -96,7 +96,7 @@ Before PR2B adoption, run `pnpm db:verify-legacy --manifest packages/db/src/migr
 pnpm test              # unit + integration
 ```
 
-> Nota: los tests de integración corren contra PostgreSQL 18 (Neon o Docker local). No se simulan múltiples tenants aún (eso viene con los tickets de permisos).
+> Nota: `pnpm test` requiere `TEST_DATABASE_URL` apuntando a PostgreSQL local de loopback y crea bases descartables para el ciclo destructivo; no uses una base remota de Neon ni compartida. No se simulan múltiples tenants aún (eso viene con los tickets de permisos).
 
 ## Deploy / CI-CD
 
