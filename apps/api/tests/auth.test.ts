@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { usuarios } from "@sechub/db";
+import { roles, usuarios, usuariosRoles } from "@sechub/db";
 import { buildApp } from "../src/app.js";
 import {
   createTestDatabase,
@@ -105,10 +105,9 @@ describe("authentication API", async () => {
     });
     const [user] = await db.select().from(usuarios).where(eq(usuarios.email, email)).limit(1);
 
-    await db
-      .update(usuarios)
-      .set({ role: "lectura" })
-      .where(eq(usuarios.id, user.id));
+    await db.delete(usuariosRoles).where(eq(usuariosRoles.usuarioId, user.id));
+    const [lecturaRole] = await db.select().from(roles).where(eq(roles.codigo, "lectura")).limit(1);
+    await db.insert(usuariosRoles).values({ usuarioId: user.id, rolId: lecturaRole.id });
 
     const loginResponse = await app.inject({
       method: "POST",
@@ -127,8 +126,8 @@ describe("authentication API", async () => {
     });
 
     expect(meResponse.statusCode).toBe(200);
-    expect(meResponse.json().user.role).toBe("admin");
-    expect(meResponse.json().user.roles).toEqual(["admin"]);
+    expect(meResponse.json().user.role).toBe("lectura");
+    expect(meResponse.json().user.roles).toEqual(["lectura"]);
   });
 
   it("persists the session across subsequent requests", async () => {

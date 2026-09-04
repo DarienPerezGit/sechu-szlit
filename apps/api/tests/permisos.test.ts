@@ -85,21 +85,20 @@ describe("permisos por rol y sector API", async () => {
     expect(adminResponse.statusCode).toBe(201);
   });
 
-  it("ignores the legacy scalar role for protected API authorization", async () => {
+  it("denies protected writes after the normalized role changes to lectura", async () => {
     const app = await createApp();
     const credentials = await seedUser(db, {
-      email: `legacy-role-${Date.now()}@test.com`,
-      role: "lectura",
+      email: `normalized-role-${Date.now()}@test.com`,
+      role: "admin",
     });
     const cookie = await loginUser(app, credentials);
     const [sector] = await db.select().from(sectores).limit(1);
     const [estado] = await db.select().from(estadosCaso).limit(1);
     const [user] = await db.select().from(usuarios).where(eq(usuarios.email, credentials.email)).limit(1);
 
-    await db
-      .update(usuarios)
-      .set({ role: "admin" })
-      .where(eq(usuarios.id, user.id));
+    const [lecturaRole] = await db.select().from(roles).where(eq(roles.codigo, "lectura")).limit(1);
+    await db.delete(usuariosRoles).where(eq(usuariosRoles.usuarioId, user.id));
+    await db.insert(usuariosRoles).values({ usuarioId: user.id, rolId: lecturaRole.id });
 
     const response = await app.inject({
       method: "POST",
@@ -108,7 +107,7 @@ describe("permisos por rol y sector API", async () => {
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estado.id,
-        expediente: `LEGACY-ROLE-${Date.now()}`,
+        expediente: `NORMALIZED-ROLE-${Date.now()}`,
         caratula: "Carpeta sin autorización",
         demandada: "Demandada",
       },
