@@ -14,7 +14,7 @@ pnpm db:migrate
 pnpm dev
 ```
 
-`pnpm db:migrate` es la única autoridad de migraciones para desarrollo local, CI y administración. En modo normal, una base existente sin metadata de migraciones falla cerrada y no se adopta automáticamente. Para una base legacy/current verificada, ejecutá una sola vez `pnpm db:migrate -- --adopt-existing`: comprueba el manifiesto legacy versionado y registra la metadata sin volver a ejecutar SQL; luego el modo normal queda como no-op.
+`pnpm db:migrate` es la única autoridad de migraciones para desarrollo local, CI y administración. En modo normal, una base existente sin metadata de migraciones falla cerrada y no se adopta automáticamente. Para una base legacy/current verificada, ejecutá una sola vez `pnpm db:migrate -- --adopt-existing`: comprueba el manifiesto legacy versionado, adopta la metadata histórica 0000..0006 y aplica las migraciones pendientes, incluida la eliminación de `usuarios.role`; luego el modo normal queda como no-op.
 
 La app queda arriba en `http://localhost:3000` (Fastify sirviendo tanto la API REST en `/api/*` como el frontend estático).
 
@@ -88,7 +88,13 @@ sechub/
 
 ## Legacy schema verification
 
-For a read-only dry run, run `pnpm db:verify-legacy --manifest packages/db/src/migrations/manifests/legacy-public-v1.json`. It validates the existing `public` schema, catalogs, and role backfill invariant without writing data or migration metadata. After it passes, explicit adoption is `pnpm db:migrate -- --adopt-existing`; it verifies the canonical shipped manifest and records migration metadata without replaying SQL. Normal `pnpm db:migrate` never adopts a metadata-free existing schema.
+For a read-only dry run, run `pnpm db:verify-legacy --manifest packages/db/src/migrations/manifests/legacy-public-v1.json`. It validates the existing `public` schema, catalogs, and role backfill invariant without writing data or migration metadata. After it passes, explicit adoption is `pnpm db:migrate -- --adopt-existing`; it verifies the canonical shipped manifest, adopts metadata for 0000..0006, and applies pending SQL including 0007. Normal `pnpm db:migrate` never adopts a metadata-free existing schema.
+
+### Rollback and restoration for migration 0007
+
+Migration 0007 is destructive: it removes the legacy `usuarios.role` column after backfilling `usuarios_roles`. Create and verify a database backup before applying it. Rollback is only supported by restoring that backup; there is no reverse SQL migration that can recover the original scalar values.
+
+In an emergency, `usuarios.role` can be reconstructed from `usuarios_roles` joined to `roles` only after defining and approving an explicit primary-role rule for users with multiple roles. Do not choose a primary role implicitly or from row order.
 
 ## Tests
 

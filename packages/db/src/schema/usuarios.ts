@@ -8,7 +8,6 @@ export const usuarios = pgTable("usuarios", {
     .primaryKey(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   passwordHash: varchar("password_hash", { length: 255 }).notNull(),
-  role: varchar("role", { length: 50 }).notNull().default("lectura"),
   estudioId: uuid("estudio_id")
     .notNull()
     .references(() => estudios.id),

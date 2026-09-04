@@ -58,7 +58,7 @@ function loadManifest(path: string): Manifest {
 }
 function migrationHashes(manifest: Manifest): void {
   const files = readdirSync(MIGRATIONS_DIR).filter((file) => file.endsWith(".sql")).sort();
-  if (files.join() !== manifest.migrations.map((migration) => migration.filename).join()) fail("migration filenames drift");
+  if (files.slice(0, manifest.migrations.length).join() !== manifest.migrations.map((migration) => migration.filename).join()) fail("migration filenames drift");
   for (const migration of manifest.migrations) {
     const path = join(MIGRATIONS_DIR, migration.filename);
     if (!existsSync(path)) fail(`shipped migration is missing: ${migration.filename}`);

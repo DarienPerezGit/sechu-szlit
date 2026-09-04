@@ -12,6 +12,7 @@ const manifestPath = join(repoRoot, manifest);
 const databases: string[] = [];
 const migrationDir = join(repoRoot, "packages/db/src/migrations");
 const migrations = readdirSync(migrationDir).filter((filename) => filename.endsWith(".sql")).sort();
+const legacyMigrations = migrations.slice(0, 7);
 
 function localAdminUrl(): string | undefined {
   const raw = process.env.TEST_DATABASE_URL;
@@ -31,7 +32,7 @@ async function database(apply = true): Promise<string> {
   if (apply) {
     const client = new Client({ connectionString: url.toString() }); await client.connect();
     try {
-      for (const filename of migrations) {
+      for (const filename of legacyMigrations) {
         const sql = readFileSync(join(repoRoot, "packages/db/src/migrations", filename), "utf8");
         for (const statement of sql.split("--> statement-breakpoint")) if (statement.trim()) await client.query(statement);
       }
