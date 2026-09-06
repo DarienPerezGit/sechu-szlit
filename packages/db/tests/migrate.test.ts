@@ -20,6 +20,8 @@ const migrationDir = join(repoRoot, "packages", "db", "src", "migrations");
 const migrationFiles = readdirSync(migrationDir).filter((file) => file.endsWith(".sql")).sort();
 const legacyMigrationFiles = migrationFiles.slice(0, 7);
 const databases: string[] = [];
+const expectedPostgresMajor = process.env.EXPECTED_POSTGRES_MAJOR;
+const PG18_SERVER_VERSION_NUM = 180000;
 
 function requireAdminUrl(): string {
   if (!adminUrl) throw new Error("TEST_DATABASE_URL is required");
@@ -101,6 +103,92 @@ describe("test database URL guard", () => {
     expect(() => assertNoAddressOverrides(new URL(`postgresql://localhost/db?${key}=remote`))).toThrow("address");
   });
   it("allows valid query settings", () => expect(() => assertNoAddressOverrides(new URL("postgresql://localhost/db?sslmode=require"))).not.toThrow());
+});
+
+describe("runMigrations UUIDv7 compatibility", () => {
+  it("uses the UUIDv7 compatibility fallback on PostgreSQL before 18", async ({ skip }) => {
+    const url = await createDatabase();
+    const pool = new Pool({ connectionString: url });
+    const db = drizzle(pool, { schema });
+    try {
+      const capability = await query(url, `SELECT current_setting('server_version_num')::int AS version`);
+      const version = capability.rows[0].version as number;
+      if (expectedPostgresMajor !== undefined) {
+        expect(Math.floor(version / 10000).toString()).toBe(expectedPostgresMajor);
+      }
+      if (version >= PG18_SERVER_VERSION_NUM) {
+        skip("PostgreSQL 18 native UUIDv7 is covered by the preservation test");
+        return;
+      }
+      expect((await query(url, `SELECT to_regprocedure('pg_catalog.uuidv7()') AS oid`)).rows[0].oid).toBeNull();
+      await query(url, `
+        CREATE FUNCTION public.uuidv7() RETURNS uuid
+        LANGUAGE sql IMMUTABLE
+        AS $$ SELECT '00000000-0000-0000-0000-000000000000'::uuid $$
+      `);
+      await runMigrations(db);
+      const generated = await query(url, `
+        SELECT public.uuidv7()::text AS id,
+               to_regprocedure('uuidv7()')::oid AS resolved_oid,
+               to_regprocedure('public.uuidv7()')::oid AS public_oid
+      `);
+      const row = generated.rows[0] as {
+        id: string;
+        resolved_oid: number;
+        public_oid: number;
+      };
+      expect(row.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      expect(row.resolved_oid).toEqual(expect.any(Number));
+      expect(row.public_oid).toEqual(expect.any(Number));
+      expect(row.public_oid).toEqual(row.resolved_oid);
+      const configuration = (await query(url, `SELECT proconfig, prosecdef FROM pg_proc WHERE oid = 'public.uuidv7()'::regprocedure`)).rows[0];
+      expect(configuration.proconfig).toContain("search_path=pg_catalog");
+      expect(configuration.prosecdef).toBe(false);
+
+      const observedBefore = Date.now();
+      const batch = await query(url, `
+        SELECT array_agg(public.uuidv7()::text ORDER BY ordinal) AS ids
+        FROM generate_series(1, 64) AS calls(ordinal)
+      `);
+      const observedAfter = Date.now();
+      const ids = batch.rows[0].ids as string[];
+      expect(ids).toHaveLength(64);
+      expect(new Set(ids).size).toBe(64);
+      expect(ids.every((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))).toBe(true);
+      const timestamps = ids.map((id) => Number.parseInt(`${id.slice(0, 8)}${id.slice(9, 13)}`, 16));
+      expect(timestamps.every((timestamp, index) => index === 0 || timestamp >= timestamps[index - 1])).toBe(true);
+      expect(timestamps.every((timestamp) => timestamp >= observedBefore - 10_000 && timestamp <= observedAfter + 10_000)).toBe(true);
+
+      expect(await runMigrations(db)).toEqual({ applied: 0 });
+      const rerun = await query(url, `SELECT to_regprocedure('uuidv7()')::oid AS resolved_oid, to_regprocedure('public.uuidv7()')::oid AS public_oid`);
+      expect(rerun.rows[0]).toEqual({ resolved_oid: row.resolved_oid, public_oid: row.public_oid });
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("preserves the native zero-argument uuidv7 on PostgreSQL 18", async ({ skip }) => {
+    const url = await createDatabase();
+    const pool = new Pool({ connectionString: url });
+    const db = drizzle(pool, { schema });
+    try {
+      const before = await query(url, `SELECT current_setting('server_version_num')::int AS version, to_regprocedure('pg_catalog.uuidv7()')::oid AS native_oid`);
+      if (expectedPostgresMajor !== undefined) {
+        expect(Math.floor(before.rows[0].version / 10000).toString()).toBe(expectedPostgresMajor);
+      }
+      if (before.rows[0].version < PG18_SERVER_VERSION_NUM) {
+        skip("PostgreSQL before 18 uses the compatibility fallback test");
+        return;
+      }
+      expect(before.rows[0].native_oid).toEqual(expect.any(Number));
+
+      await runMigrations(db);
+      const after = await query(url, `SELECT to_regprocedure('uuidv7()')::oid AS resolved_oid, to_regprocedure('public.uuidv7()')::oid AS public_oid`);
+      expect(after.rows[0]).toEqual({ resolved_oid: before.rows[0].native_oid, public_oid: null });
+    } finally {
+      await pool.end();
+    }
+  });
 });
 
 describe("pnpm db:migrate", () => {
