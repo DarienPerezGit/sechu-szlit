@@ -26,8 +26,12 @@ try {
   const result = await runMigrations(drizzle(pool, { schema }), undefined, {
     adoptExisting: forwardedArgs.includes("--adopt-existing"),
   });
-  if (result.adopted) console.log(`Adopted ${result.adopted} migration(s).`);
-  else console.log(result.applied ? `Applied ${result.applied} migration(s).` : "Database is up to date.");
+  if (result.adopted) {
+    console.log(`Adopted ${result.adopted} migration(s).`);
+    if (result.applied) console.log(`Applied ${result.applied} migration(s).`);
+  } else {
+    console.log(result.applied ? `Applied ${result.applied} migration(s).` : "Database is up to date.");
+  }
 } finally {
   await pool.end();
 }

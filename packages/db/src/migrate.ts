@@ -7,6 +7,7 @@ import type { Database } from "./index.js";
 import { migrationSha256, normalizeMigration } from "./migration-utils.js";
 
 const METADATA_TABLE = "__sechub_migrations";
+const LEGACY_MIGRATION_COUNT = 7;
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "migrations");
 const LEGACY_MANIFEST = join(MIGRATIONS_DIR, "manifests", "legacy-public-v1.json");
 const METADATA_DDL = `CREATE TABLE "${METADATA_TABLE}" (
@@ -72,17 +73,20 @@ export async function runMigrations(
     const records = await tx.execute(sql.raw(
       `SELECT filename, sha256 FROM "${METADATA_TABLE}" ORDER BY id`,
     ));
-    const applied = records.rows as MetadataRow[];
+    let applied = records.rows as MetadataRow[];
     if (applied.length === 0 && objects.rows.length > 0 && !adopting) {
       refuse(`migration metadata is empty but the schema is not fresh; repair the metadata before retrying.`);
     }
+    let adopted = 0;
     if (adopting) {
-      for (const migration of migrations) {
+      const legacyMigrations = migrations.slice(0, LEGACY_MIGRATION_COUNT);
+      for (const migration of legacyMigrations) {
         await tx.execute(sql.raw(
           `INSERT INTO "${METADATA_TABLE}" (filename, sha256) VALUES ('${migration.filename.replace(/'/g, "''")}', '${migration.sha256}')`,
         ));
       }
-      return { applied: 0, adopted: migrations.length };
+      applied = legacyMigrations;
+      adopted = legacyMigrations.length;
     }
     if (applied.length > migrations.length) {
       refuse("migration metadata contains entries not present in the migration history.");
@@ -104,6 +108,8 @@ export async function runMigrations(
         `INSERT INTO "${METADATA_TABLE}" (filename, sha256) VALUES ('${migration.filename.replace(/'/g, "''")}', '${migration.sha256}')`,
       ));
     }
-    return { applied: migrations.length - applied.length };
+    return adopted
+      ? { applied: migrations.length - applied.length, adopted }
+      : { applied: migrations.length - applied.length };
   });
 }
