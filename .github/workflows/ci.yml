@@ -7,9 +7,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        postgres_version: [17, 18]
     services:
       postgres:
-        image: postgres:18-alpine
+        image: postgres:${{ matrix.postgres_version }}-alpine
         env:
           POSTGRES_USER: sechub
           POSTGRES_PASSWORD: sechub
@@ -24,6 +27,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://sechub:sechub@127.0.0.1:5432/sechub
       TEST_DATABASE_URL: postgresql://sechub:sechub@127.0.0.1:5432/postgres
+      EXPECTED_POSTGRES_MAJOR: ${{ matrix.postgres_version }}
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4.4.0
@@ -36,4 +40,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:migrate
       - run: pnpm typecheck
-      - run: pnpm test
+      - if: matrix.postgres_version == 18
+        run: pnpm test
+      - if: matrix.postgres_version == 17
+        run: pnpm --filter db exec vitest run tests/migrate.test.ts --testNamePattern "runMigrations UUIDv7 compatibility"

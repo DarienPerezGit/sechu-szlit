@@ -17,6 +17,45 @@ const METADATA_DDL = `CREATE TABLE "${METADATA_TABLE}" (
   "applied_at" timestamptz NOT NULL DEFAULT now()
 )`;
 
+const UUIDV7_COMPATIBILITY_DDL = `
+      DO $$
+      BEGIN
+        IF to_regprocedure('pg_catalog.uuidv7()') IS NULL THEN
+          IF to_regprocedure('pg_catalog.gen_random_uuid()') IS NULL THEN
+            RAISE EXCEPTION 'UUIDv7 compatibility requires PostgreSQL gen_random_uuid()';
+          END IF;
+          CREATE OR REPLACE FUNCTION public.uuidv7() RETURNS uuid
+          LANGUAGE sql VOLATILE PARALLEL SAFE SECURITY INVOKER
+          SET search_path = pg_catalog
+          AS $function$
+            WITH random_bytes AS (
+              SELECT uuid_send(gen_random_uuid()) AS bytes
+            ), timestamp_bytes AS (
+              -- The first 48 bits are Unix epoch milliseconds in network byte order.
+              SELECT substring(
+                int8send(floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint)
+                FROM 3 FOR 6
+              ) AS bytes
+            ), versioned AS (
+              -- Set the RFC 9562 version 7 and variant bits in the random bytes.
+              SELECT set_byte(
+                set_byte(
+                  overlay(random_bytes.bytes placing timestamp_bytes.bytes from 1 for 6),
+                  6,
+                  (get_byte(random_bytes.bytes, 6) & 15) | 112
+                ),
+                8,
+                (get_byte(random_bytes.bytes, 8) & 63) | 128
+              ) AS bytes
+              FROM random_bytes CROSS JOIN timestamp_bytes
+            )
+            SELECT encode(bytes, 'hex')::uuid FROM versioned
+          $function$;
+        END IF;
+      END
+      $$;
+    `;
+
 type Migration = { filename: string; contents: string; sha256: string };
 type MetadataRow = { filename: string; sha256: string };
 export type MigrationOptions = { adoptExisting?: boolean };
@@ -45,6 +84,7 @@ export async function runMigrations(
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('sechub:migrations:v1'))`);
     await tx.execute(sql`SET LOCAL search_path TO public`);
+    await tx.execute(sql.raw(UUIDV7_COMPATIBILITY_DDL));
     const pinnedSchema = (await tx.execute(sql`SELECT current_schema() AS name`)).rows[0] as { name: string };
     if (pinnedSchema.name !== "public") refuse("migration transaction must use the public schema.");
     const objects = await tx.execute(sql.raw(`
