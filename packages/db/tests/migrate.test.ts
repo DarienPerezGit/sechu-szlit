@@ -13,8 +13,11 @@ import { assertNoAddressOverrides } from "../../../tests/helpers/test-database.j
 const execFile = promisify(execFileCallback);
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const explicitDatabaseUrl = process.env.DATABASE_URL;
+const explicitMigrationDatabaseUrl = process.env.MIGRATION_DATABASE_URL;
 config({ path: join(repoRoot, ".env.local"), override: true });
 if (explicitDatabaseUrl !== undefined) process.env.DATABASE_URL = explicitDatabaseUrl;
+if (explicitMigrationDatabaseUrl !== undefined) process.env.MIGRATION_DATABASE_URL = explicitMigrationDatabaseUrl;
+else delete process.env.MIGRATION_DATABASE_URL;
 const adminUrl = process.env.TEST_DATABASE_URL;
 const migrationDir = join(repoRoot, "packages", "db", "src", "migrations");
 const migrationFiles = readdirSync(migrationDir).filter((file) => file.endsWith(".sql")).sort();
@@ -53,10 +56,14 @@ function withSearchPath(url: string): string {
   return scoped.toString();
 }
 
-async function invokeMigration(url: string, testDatabaseUrl?: string, args: string[] = []) {
+async function invokeMigration(migrationDatabaseUrl: string | undefined, testDatabaseUrl?: string, args: string[] = [], runtimeDatabaseUrl?: string) {
   try {
     const windows = process.platform === "win32";
-    const env = { ...process.env, DATABASE_URL: url };
+    const env = { ...process.env };
+    if (runtimeDatabaseUrl !== undefined) env.DATABASE_URL = runtimeDatabaseUrl;
+    else delete env.DATABASE_URL;
+    if (migrationDatabaseUrl) env.MIGRATION_DATABASE_URL = migrationDatabaseUrl;
+    else env.MIGRATION_DATABASE_URL = "";
     if (testDatabaseUrl) env.TEST_DATABASE_URL = testDatabaseUrl;
     else delete env.TEST_DATABASE_URL;
     const result = await execFile(
@@ -192,16 +199,39 @@ describe("runMigrations UUIDv7 compatibility", () => {
 });
 
 describe("pnpm db:migrate", () => {
-  it("uses DATABASE_URL when both migration variables are present", async () => {
-    const databaseUrl = await createDatabase();
-    const testDatabaseUrl = await createDatabase();
-    const result = await invokeMigration(databaseUrl, testDatabaseUrl);
+  it("uses MIGRATION_DATABASE_URL and ignores DATABASE_URL", async () => {
+    const migrationDatabaseUrl = await createDatabase();
+    const runtimeDatabaseUrl = await createDatabase();
+    const result = await invokeMigration(migrationDatabaseUrl, undefined, [], runtimeDatabaseUrl);
 
     expect(result.status).toBe(0);
-    expect((await query(databaseUrl, `SELECT count(*)::int AS count FROM "__sechub_migrations"`)).rows[0].count)
+    expect((await query(migrationDatabaseUrl, `SELECT count(*)::int AS count FROM "__sechub_migrations"`)).rows[0].count)
       .toBe(8);
-    expect((await query(testDatabaseUrl, `SELECT to_regclass('__sechub_migrations') AS name`)).rows[0].name)
+    expect((await query(runtimeDatabaseUrl, `SELECT to_regclass('__sechub_migrations') AS name`)).rows[0].name)
       .toBeNull();
+  });
+
+  it("requires MIGRATION_DATABASE_URL even when DATABASE_URL exists", async () => {
+    const runtimeDatabaseUrl = await createDatabase();
+    const result = await invokeMigration(undefined, undefined, [], runtimeDatabaseUrl);
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}${result.stderr}`).toContain("MIGRATION_DATABASE_URL is required");
+    expect((await query(runtimeDatabaseUrl, `SELECT to_regclass('__sechub_migrations') AS name`)).rows[0].name)
+      .toBeNull();
+  });
+
+  it("reports unavailable migration connections without exposing credentials", async () => {
+    const unavailable = new URL(requireAdminUrl());
+    unavailable.port = "1";
+    const connectionString = unavailable.toString();
+    const result = await invokeMigration(connectionString);
+
+    expect(result.status).toBe(1);
+    const output = `${result.stdout}${result.stderr}`;
+    expect(output).toContain("Migration database connection failed.");
+    expect(output).not.toContain(connectionString);
+    expect(output).not.toContain(unavailable.password);
   });
 
   it("applies the complete history once and repeats as an exact no-op", async () => {
