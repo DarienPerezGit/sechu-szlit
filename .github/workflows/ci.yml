@@ -26,6 +26,7 @@ jobs:
           --health-retries=12
     env:
       DATABASE_URL: postgresql://sechub:sechub@127.0.0.1:5432/sechub
+      MIGRATION_DATABASE_URL: postgresql://sechub:sechub@127.0.0.1:5432/sechub
       TEST_DATABASE_URL: postgresql://sechub:sechub@127.0.0.1:5432/postgres
       EXPECTED_POSTGRES_MAJOR: ${{ matrix.postgres_version }}
     steps:

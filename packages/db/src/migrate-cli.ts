@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { schema } from "./index.js";
+import { LegacyVerificationError } from "./legacy-verifier.js";
 import { runMigrations } from "./migrate.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -18,8 +19,8 @@ if (forwardedArgs.some((arg) => arg !== "--adopt-existing") || forwardedArgs.len
   throw new Error("usage: pnpm db:migrate [-- --adopt-existing]");
 }
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) throw new Error("DATABASE_URL is required");
+const connectionString = process.env.MIGRATION_DATABASE_URL;
+if (!connectionString) throw new Error("MIGRATION_DATABASE_URL is required");
 
 const pool = new Pool({ connectionString });
 try {
@@ -32,6 +33,9 @@ try {
   } else {
     console.log(result.applied ? `Applied ${result.applied} migration(s).` : "Database is up to date.");
   }
+} catch (error) {
+  if (error instanceof LegacyVerificationError || (error instanceof Error && error.message.startsWith("Migration refused:"))) throw error;
+  throw new Error("Migration database connection failed. Check MIGRATION_DATABASE_URL and database availability.");
 } finally {
   await pool.end();
 }

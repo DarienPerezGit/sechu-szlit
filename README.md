@@ -9,16 +9,16 @@ Sistema de gestión para estudios jurídicos laborales: unifica agenda de audien
 ```bash
 git clone <repo> && cd sechub
 pnpm install
-npx neonctl@latest init      # autentica contra Neon y genera .env.local con DATABASE_URL
+# Configurá .env.local con DATABASE_URL y MIGRATION_DATABASE_URL (ver abajo)
 pnpm db:migrate
 pnpm dev
 ```
 
-`pnpm db:migrate` es la única autoridad de migraciones para desarrollo local, CI y administración. En modo normal, una base existente sin metadata de migraciones falla cerrada y no se adopta automáticamente. Para una base legacy/current verificada, ejecutá una sola vez `pnpm db:migrate -- --adopt-existing`: comprueba el manifiesto legacy versionado, adopta la metadata histórica 0000..0006 y aplica las migraciones pendientes, incluida la eliminación de `usuarios.role`; luego el modo normal queda como no-op.
+`pnpm db:migrate` es la única autoridad de migraciones para desarrollo local, CI y administración, y requiere `MIGRATION_DATABASE_URL` (no usa `DATABASE_URL`). En modo normal, una base existente sin metadata de migraciones falla cerrada y no se adopta automáticamente. Para una base legacy/current verificada, ejecutá una sola vez `pnpm db:migrate -- --adopt-existing`: comprueba el manifiesto legacy versionado, adopta la metadata histórica 0000..0006 y aplica las migraciones pendientes, incluida la eliminación de `usuarios.role`; luego el modo normal queda como no-op.
 
 La app queda arriba en `http://localhost:3000` (Fastify sirviendo tanto la API REST en `/api/*` como el frontend estático).
 
-**Alternativa local con Docker** (sin Neon): `docker compose up -d postgres`, copiar `.env.example` a `.env.local` y ajustar `DATABASE_URL`.
+**Alternativa local con Docker** (sin Supabase): `docker compose up -d postgres`, copiar `.env.example` a `.env.local` y ajustar `DATABASE_URL` y `MIGRATION_DATABASE_URL`.
 
 ## Qué resuelve
 
@@ -55,15 +55,18 @@ Frontend estático ┼─▶ API REST ─▶ Drizzle ORM     │ ──▶ Postg
 ## Requisitos / setup local
 
 - Node.js 20+, pnpm 9+
-- Base de datos PostgreSQL 18:
-  - **Neon** (recomendado para dev/scratch): `npx neonctl@latest init` genera `.env.local` con `DATABASE_URL`. Elegido sobre Supabase porque Neon es Postgres puro sin capa de API pública (PostgREST) que expondría cada tabla nueva salvo RLS activo por tabla.
-  - **Docker local** (alternativa): `docker compose up -d postgres` (Postgres 18-alpine) y usar la `DATABASE_URL` de `.env.example`.
+- Base de datos PostgreSQL 17 o 18:
+  - **Supabase**: `DATABASE_URL` usa el Session pooler para el runtime. Para administración y migraciones, `MIGRATION_DATABASE_URL` prefiere el endpoint directo; si el entorno admin solo tiene IPv4, usá el Session pooler en el puerto 5432. El Transaction pooler en el puerto 6543 no sirve para migraciones.
+  - **Docker local** (alternativa): `docker compose up -d postgres` (Postgres 18-alpine) y usar las URLs de `.env.example`.
 - Credenciales OAuth de Google Cloud (Gmail API + Calendar API) por cuenta del estudio (requerido solo para el worker de mail, fase posterior)
 
 Variables de entorno (`.env.example` como plantilla; `.env` y `.env.local` están en `.gitignore`):
 
 ```bash
-DATABASE_URL=postgresql://user:pass@localhost:5432/sechub
+# Runtime: Supabase Session pooler (puerto 5432)
+DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+# Admin y migraciones: preferir el endpoint directo
+MIGRATION_DATABASE_URL=postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres
 COOKIE_SECRET=change-me-in-production-minimum-32-characters-long
 NODE_ENV=development
 PORT=3000
