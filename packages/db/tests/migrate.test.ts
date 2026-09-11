@@ -223,6 +223,7 @@ describe("pnpm db:migrate", () => {
 
   it("reports unavailable migration connections without exposing credentials", async () => {
     const unavailable = new URL(requireAdminUrl());
+    unavailable.password = "ci-secret-39-do-not-print";
     unavailable.port = "1";
     const connectionString = unavailable.toString();
     const result = await invokeMigration(connectionString);
