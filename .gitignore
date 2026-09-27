@@ -5,6 +5,9 @@ node_modules/
 .env
 .env.local
 
+# Supabase CLI link state (project-ref, pooler-url with credentials)
+supabase/.temp/
+
 # Build output
 dist/
 apps/web/dist/
