@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { estudios } from "./estudios.js";
 
 export const usuarios = pgTable("usuarios", {
@@ -11,6 +11,8 @@ export const usuarios = pgTable("usuarios", {
   estudioId: uuid("estudio_id")
     .notNull()
     .references(() => estudios.id),
+  supabaseUserId: uuid("supabase_user_id").unique(),
+  activo: boolean("activo").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
