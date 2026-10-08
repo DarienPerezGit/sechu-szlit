@@ -10,8 +10,9 @@ Companion document: `docs/supabase-validation.md` (issue #26, the target validat
 
 ## 1. What this runbook proves
 
-Every procedure below was executed end to end. The numbers in this document are observed
-output, not estimates.
+Every procedure below was executed end to end, **except section 5c**, which was not. The numbers in
+this document are observed output, not estimates. Anything not run is marked unverified where it
+appears.
 
 | Check | Result |
 | ----- | ------ |
@@ -175,6 +176,7 @@ pg_restore --list sechub.dump |
     Out-File -FilePath toc-local.txt -Encoding ascii
 
 pg_restore -d sechub_local_restore `
+    -h localhost -U postgres `
     --schema=public `
     --no-owner `
     --single-transaction `
@@ -182,15 +184,20 @@ pg_restore -d sechub_local_restore `
     sechub.dump
 ```
 
+`pg_restore` takes `-h` and `-U` explicitly for the same reason the setup `psql` calls above do:
+section 2 left `PGHOST` and `PGUSER` pointing at the Supabase pooler, and libpq would otherwise send this
+restore to the project instead of localhost, defeating the entire point of this target.
+
 ### 5c. Local Supabase stack via `supabase start`
 
 **Not verified.** Docker was not runnable in the environment where this runbook was written, so
 this path is documented from the CLI contract and should be treated as untested until someone runs
 it.
 
-It is the most faithful of the three targets, because `supabase start` brings up a real platform:
-`anon`, `authenticated`, `service_role` and `supabase_vault` all exist by construction, so none of
-the exclusions in 5b are needed and only the 24 `DEFAULT ACL` entries must still be filtered.
+It is exactly as faithful as 5a, with fewer manual setup steps, because `supabase start` brings up a
+real platform: `anon`, `authenticated`, `service_role` and `supabase_vault` all exist by
+construction, so none of the exclusions in 5b are needed and only the 24 `DEFAULT ACL` entries must
+still be filtered.
 
 ```powershell
 supabase start
@@ -214,7 +221,7 @@ pg_restore -d sechub_supabase_restore `
 ```
 
 The archive was taken from a **hosted** project, so a restore into `supabase start` also carries
-the risk in limitation 2: drop `supabase_supabase_restore` when finished rather than restoring
+the risk in limitation 2: drop `sechub_supabase_restore` when finished rather than restoring
 platform schemas on top of a live local stack.
 
 ---
@@ -261,22 +268,112 @@ depending on `lc_messages`, so match on either.
 
 ---
 
-## 7. Timing before the presentation
+## 7. Pause, recovery, and timing before the presentation
 
-The free-tier project pauses after **7 days of inactivity**. A paused project keeps its data, but
-new connections are rejected, so the API and the migrations both fail. Unpausing takes on the order
-of minutes and needs no intervention once triggered.
+### 7.1 What actually triggers a pause
 
-Recommended sequence:
+The Free plan pauses a project after a week of low activity. **It is not an idle timer.** Supabase
+defines inactivity as insufficient *user database activity* over a rolling 7-day window, and warns
+explicitly:
+
+> "While you may be actively using the project, it's possible that usage is not enough to exclude it
+> from automatic pausing."
+
+So visiting the dashboard once a week may not keep the project alive. The cheapest keep-alive that is
+sufficient under every documented definition is a real query against the database, once a day.
+
+Supabase sends two emails: a warning roughly a week before the pause, and a confirmation once it has
+happened. Resuming inside the warning window avoids the pause entirely. Paid plans are never paused
+for inactivity.
+
+> Sources: [free-project-pausing](https://supabase.com/docs/guides/platform/free-project-pausing),
+> [pricing](https://supabase.com/pricing). Full analysis with quotes in
+> [`docs/research/supabase-pause-recovery.md`](research/supabase-pause-recovery.md).
+
+### 7.2 Detecting a pause
+
+**A paused project reports `status: "INACTIVE"`. There is no `PAUSED` value in the status enum** —
+grepping for `PAUSED` finds only `PAUSING`, the transient in-flight state, and leads to the wrong
+conclusion.
+
+```bash
+curl "https://api.supabase.com/v1/projects/$PROJECT_REF" \
+  -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN"
+```
+
+Or via the CLI, which requires `-o json` — **the default table has no status column and renders a
+paused project identically to a healthy one**:
+
+```bash
+supabase projects list -o json | jq -r '.[] | select(.id=="'"$PROJECT_REF"'") | .status'
+```
+
+> **A refused connection is a symptom, not a diagnosis.** Three distinct documented causes produce
+> it, and Supabase's own troubleshooting page attributes connection-refused to Fail2ban IP bans —
+> a completely different remedy. Two other conditions look identical from outside but are *not* a
+> pause: read-only mode, which Free projects enter at **500 MB** database size and which reports
+> `SQLSTATE 25006`, and Fair Use restriction, which returns `402`. A running-but-read-only project
+> and a paused project both look like "the app is broken"; their fixes are opposite.
+
+### 7.3 Recovering a paused project
+
+Resume first, then restore. Do not assume a paused project can accept a restore.
+
+**Dashboard** — organization → paused project → **Resume project** → confirm. The project returns to
+its previous state including data and configuration. Note the pause control lives under
+*Settings → General → Project availability* while the resume control does not.
+
+**Management API** — the scriptable path:
+
+```bash
+curl -X POST "https://api.supabase.com/v1/projects/$PROJECT_REF/restore" \
+  -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN"
+```
+
+Requires `projects:write`, or `project_admin_write` on a fine-grained token. The **200 response body
+is empty** — there is no status field in it. Poll instead:
+
+```bash
+# watch RESTORING -> ACTIVE_HEALTHY
+curl "https://api.supabase.com/v1/projects/$PROJECT_REF" \
+  -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN"
+```
+
+**There is no CLI equivalent.** `supabase projects` has no pause or unpause subcommand, verified
+against both the CLI reference and the CLI source tree. `supabase branches unpause` exists but
+operates on preview branches, and branch resume is on-demand-on-first-request — a different
+mechanism entirely. Do not substitute one for the other.
+
+Supabase publishes **no duration** for a resume. Do not quote one. Resume is asynchronous — the
+`RESTORING` and `RESTORE_FAILED` states exist in the status enum — so the procedure is to poll, not
+to wait a guessed number of minutes. Measuring the real duration on this project is an open task; see
+the research doc, section 11.
+
+### 7.4 Sequence
 
 | When | Action |
 | ---- | ------ |
-| **7 days before** | Confirm the project has not paused. Open the dashboard, or run `supabase projects list`. A paused project does not appear as an error in code, it just refuses connections. |
+| **7 days before** | Confirm `status` is `ACTIVE_HEALTHY`. Watch for the warning email — a resume inside that window avoids the pause entirely. |
 | **48 hours before** | Take the backup in section 4. Store it off the presentation machine. |
 | **24 hours before** | Take a second backup, so you have a copy that predates the last day of demos. |
 | **2 hours before** | Run the verification in section 6 against a scratch database. This is the rehearsal, not a formality. |
 | **30 minutes before** | Confirm the API reaches the database. `pnpm db:migrate` should report `Database is up to date`. |
 | **During** | Nothing. Do not run migrations mid-presentation. |
+
+### 7.5 Do not depend on the platform restore window
+
+Supabase's documentation contradicts itself on how long a paused project stays restorable. The live
+guides say **1 year**, but the same page's heading is anchored `#90-day-window-to-restore`, a
+troubleshooting page titled "Restored for More Than 1 Year" sits at the slug `…after-90-days-pause`,
+and the only changelog record of the policy still says **90 days**. No changelog entry announces the
+change to 1 year.
+
+The current documented window is 1 year, but do not build a procedure on the difference. This is the
+argument for the discipline above rather than against it: a `pg_dump` archive is timestamped, stored
+off the presentation machine, and yours. The platform-side artifact is a single snapshot from an
+unknown time in the past. A project paused the week before a demo is not a data-loss event; a project
+left paused for a term is. Analysis in
+[`docs/research/supabase-pause-recovery.md`](research/supabase-pause-recovery.md), section 8.
 
 ---
 
