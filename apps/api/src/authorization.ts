@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { ROLE_CODES, type Database } from "@sechub/db";
+import { ROLE_CODES, type Database, type Usuario } from "@sechub/db";
 import { getAuthenticatedUser } from "./utils/auth.js";
 
 export interface AuthorizationContext {
@@ -10,7 +10,7 @@ export interface AuthorizationContext {
 }
 
 export interface WriteAuthorization {
-  user: NonNullable<Awaited<ReturnType<typeof getAuthenticatedUser>>>;
+  user: Usuario;
   authorization: AuthorizationContext;
 }
 

@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDatabase } from "@sechub/db";
 import { buildApp } from "./app.js";
+import { createSupabaseClient } from "./utils/auth.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const envDir = join(__dirname, "..", "..", "..");
@@ -16,13 +17,22 @@ const cookieSecret = process.env.COOKIE_SECRET ?? "change-me-in-production";
 const environment =
   (process.env.NODE_ENV as "development" | "production" | "test") ?? "development";
 
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.SUPABASE_ANON_KEY;
+
 export async function createServer(
   connectionString: string,
   serverEnvironment = environment,
   secret = cookieSecret,
 ) {
   const db = createDatabase(connectionString);
-  return buildApp({ db, cookieSecret: secret, environment: serverEnvironment });
+  const supabase = createSupabaseClient(supabaseUrl, supabaseAnonKey);
+  return buildApp({
+    db,
+    cookieSecret: secret,
+    environment: serverEnvironment,
+    supabase,
+  });
 }
 
 async function main() {

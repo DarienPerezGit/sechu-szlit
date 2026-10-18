@@ -6,6 +6,7 @@ import {
   runMigrations,
   type Database,
   type RoleCode,
+  type Usuario,
   estudios,
   sessions,
   usuarios,
@@ -35,8 +36,10 @@ export async function seedUser(
     email?: string;
     password?: string;
     role?: RoleCode;
+    supabaseUserId?: string | null;
+    activo?: boolean;
   } = {},
-): Promise<{ email: string; password: string; estudioId: string }> {
+): Promise<{ id: string; email: string; password: string; estudioId: string; user: Usuario }> {
   const [estudio] = await db.select().from(estudios).limit(1);
   if (!estudio) {
     throw new Error("No seed estudio found; run migrations first");
@@ -53,6 +56,8 @@ export async function seedUser(
       email,
       passwordHash,
       estudioId: estudio.id,
+      supabaseUserId: overrides.supabaseUserId ?? null,
+      activo: overrides.activo ?? true,
     })
     .returning();
 
@@ -64,7 +69,7 @@ export async function seedUser(
     ON CONFLICT (usuario_id, rol_id) DO NOTHING
   `);
 
-  return { email, password, estudioId: user.estudioId };
+  return { id: user.id, email, password, estudioId: user.estudioId, user };
 }
 
 export async function resetDatabase(db: Database): Promise<void> {

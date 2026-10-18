@@ -3,6 +3,7 @@ import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { type Database } from "@sechub/db";
 import { actasRoutes } from "./routes/actas.js";
 import { authRoutes } from "./routes/auth.js";
@@ -10,19 +11,31 @@ import { catalogosRoutes } from "./routes/catalogos.js";
 import { carpetasRoutes } from "./routes/carpetas.js";
 import { audienciasRoutes } from "./routes/audiencias.js";
 
+declare module "fastify" {
+  interface FastifyInstance {
+    supabase: SupabaseClient | null;
+  }
+}
+
 export interface AppDependencies {
   db: Database;
   cookieSecret: string;
   environment: "development" | "production" | "test";
   webRoot?: string;
+  /** Supabase client for Bearer token validation. When omitted or null, Bearer auth
+   *  is rejected and the app falls back to session cookies (dev only). */
+  supabase?: SupabaseClient | null;
 }
 
 export async function buildApp(deps: AppDependencies) {
   const isProduction = deps.environment === "production";
+  const supabase = deps.supabase ?? null;
 
   const app = Fastify({
     logger: deps.environment === "development",
   });
+
+  app.decorate("supabase", supabase);
 
   await app.register(fastifyCookie, {
     secret: deps.cookieSecret,
