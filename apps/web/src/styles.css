@@ -1,0 +1,150 @@
+:root {
+  color-scheme: light;
+  font-family:
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+  background: #f4f6f9;
+  color: #1f2933;
+}
+
+.container {
+  max-width: 26rem;
+  margin: 3.5rem auto;
+  padding: 0 1rem;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  padding: 1.75rem;
+  box-shadow: 0 1px 3px rgba(31, 41, 51, 0.08);
+}
+
+.card__title {
+  margin: 0 0 0.25rem;
+  font-size: 1.35rem;
+}
+
+.card__subtitle {
+  margin: 0 0 1.25rem;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.field {
+  display: block;
+  margin-bottom: 1rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.field input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.35rem;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  background: #ffffff;
+}
+
+.field input:focus {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+  border-color: #2563eb;
+}
+
+.field input:disabled {
+  background: #f1f5f9;
+}
+
+.button {
+  display: inline-block;
+  width: 100%;
+  padding: 0.6rem 1rem;
+  margin-top: 0.35rem;
+  font: inherit;
+  font-weight: 600;
+  color: #ffffff;
+  background: #1d4ed8;
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: #1e40af;
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.button--ghost {
+  background: transparent;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.button--ghost:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.alert {
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.alert--error {
+  background: #fee2e2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.alert--warn {
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  color: #92400e;
+}
+
+.alert--info {
+  background: #dbeafe;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+}
+
+.status {
+  margin: 0;
+  color: #475569;
+}
+
+.status-line {
+  margin: 0.4rem 0;
+}
+
+.badge {
+  display: inline-block;
+  margin: 0 0.3rem 0.2rem 0;
+  padding: 0.15rem 0.6rem;
+  background: #e2e8f0;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
