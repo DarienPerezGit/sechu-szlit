@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { render, screen, act, waitFor } from "@testing-library/react";
+import { render, screen, act, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { setSupabaseClient } from "./lib/supabase";
@@ -150,5 +150,51 @@ describe("App auth gate", () => {
     });
 
     expect(await screen.findByText("Iniciar sesión")).toBeTruthy();
+  });
+
+  it("shows the expiry notice when the session is lost mid-use (failed refresh)", async () => {
+    const { capturedAuthHandlers } = createFakeClient({ sessionToken: "tok-1" });
+    const fetchMock: MockedFetch = vi
+      .fn()
+      .mockImplementation(async () =>
+        fakeApiResponse(200, JSON.stringify(ME_PAYLOAD)),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    expect(await screen.findByText("Sesión iniciada")).toBeTruthy();
+
+    // The library has no dedicated refresh-failure event: when a background
+    // token refresh fails it removes the dead session and emits SIGNED_OUT.
+    await act(async () => {
+      for (const handler of capturedAuthHandlers) {
+        handler("SIGNED_OUT", null);
+      }
+    });
+
+    expect(
+      await screen.findByText("Tu sesión expiró. Iniciá sesión nuevamente."),
+    ).toBeTruthy();
+  });
+
+  it("does not show the expiry notice after a manual logout", async () => {
+    const { signOut } = createFakeClient({ sessionToken: "tok-1" });
+    const fetchMock: MockedFetch = vi
+      .fn()
+      .mockImplementation(async () =>
+        fakeApiResponse(200, JSON.stringify(ME_PAYLOAD)),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    expect(await screen.findByText("Sesión iniciada")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar sesión" }));
+
+    expect(await screen.findByText("Iniciar sesión")).toBeTruthy();
+    expect(screen.queryByText("Tu sesión expiró. Iniciá sesión nuevamente.")).toBeNull();
+    await waitFor(() => {
+      expect(signOut).toHaveBeenCalledTimes(1);
+    });
   });
 });
