@@ -1,27 +1,8 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Login } from "./Login";
 import { setSupabaseClient } from "../lib/supabase";
-
-function createFakeClient(options: {
-  signInResult: { data: unknown; error: { message: string; status?: number } | null };
-}) {
-  const signInWithPassword = vi.fn().mockResolvedValue(options.signInResult);
-  const fake = {
-    auth: {
-      signInWithPassword,
-      getSession: vi.fn(),
-      refreshSession: vi.fn(),
-      signOut: vi.fn().mockResolvedValue({ error: null }),
-      onAuthStateChange: vi.fn().mockReturnValue({
-        data: { subscription: { unsubscribe: vi.fn() } },
-      }),
-    },
-  };
-  setSupabaseClient(fake as unknown as SupabaseClient);
-  return { signInWithPassword };
-}
+import { createFakeSupabaseClient } from "../test-helpers/fake-supabase";
 
 function fillAndSubmit(email: string, password: string): void {
   fireEvent.change(screen.getByLabelText(/Correo electrónico/), {
@@ -40,7 +21,7 @@ afterEach(() => {
 
 describe("Login", () => {
   it("renders email and password fields (no local credential API)", () => {
-    createFakeClient({
+    createFakeSupabaseClient({
       signInResult: { data: {}, error: null },
     });
 
@@ -55,7 +36,7 @@ describe("Login", () => {
   });
 
   it("shows the notice above the form when provided", () => {
-    createFakeClient({ signInResult: { data: {}, error: null } });
+    createFakeSupabaseClient({ signInResult: { data: {}, error: null } });
 
     render(
       <Login notice="Tu sesión expiró. Iniciá sesión nuevamente." onSuccess={vi.fn()} />,
@@ -67,7 +48,7 @@ describe("Login", () => {
   });
 
   it("maps Supabase credential failures to a Spanish message and stays on login", async () => {
-    const { signInWithPassword } = createFakeClient({
+    const { signInWithPassword } = createFakeSupabaseClient({
       signInResult: {
         data: { user: null, session: null },
         error: { message: "Invalid login credentials", status: 400 },
@@ -91,7 +72,7 @@ describe("Login", () => {
   });
 
   it("calls onSuccess after a successful sign-in without an error state", async () => {
-    const { signInWithPassword } = createFakeClient({
+    const { signInWithPassword } = createFakeSupabaseClient({
       signInResult: { data: { user: {}, session: {} }, error: null },
     });
     const onSuccess = vi.fn();

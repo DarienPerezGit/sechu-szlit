@@ -1,61 +1,8 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, apiFetch, isDeactivatedError } from "./api";
 import { setSupabaseClient } from "./supabase";
-
-interface FakeResponseInit {
-  status: number;
-  body?: string;
-}
-
-function fakeJsonResponse({ status, body }: FakeResponseInit): Response {
-  const ok = status >= 200 && status < 300;
-  return { ok, status, text: async () => body ?? "" } as unknown as Response;
-}
-
-interface FakeAuthConfig {
-  /** Access token returned by getSession (null = no session). */
-  initialToken: string | null;
-  /** Access token returned by refreshSession (empty call = refresh fails). */
-  refreshedToken?: string | null;
-}
-
-function createFakeClient(config: FakeAuthConfig) {
-  const getSession = vi.fn().mockResolvedValue({
-    data: {
-      session: config.initialToken
-        ? { access_token: config.initialToken }
-        : null,
-    },
-    error: null,
-  });
-  const refreshSession = vi.fn().mockResolvedValue({
-    data: {
-      session: config.refreshedToken
-        ? { access_token: config.refreshedToken }
-        : null,
-    },
-    error: null,
-  });
-  const signInWithPassword = vi.fn();
-  const signOut = vi.fn().mockResolvedValue({ error: null });
-  const onAuthStateChange = vi.fn().mockReturnValue({
-    data: { subscription: { unsubscribe: vi.fn() } },
-  });
-
-  const fake = {
-    auth: {
-      getSession,
-      refreshSession,
-      signInWithPassword,
-      signOut,
-      onAuthStateChange,
-    },
-  };
-
-  setSupabaseClient(fake as unknown as SupabaseClient);
-  return { getSession, refreshSession, signInWithPassword, signOut, onAuthStateChange };
-}
+import { fakeJsonResponse } from "../test-helpers/fake-response";
+import { createFakeSupabaseClient } from "../test-helpers/fake-supabase";
 
 function fetchCallsWithAuthorization(
   fetchMock: ReturnType<typeof vi.fn>,
@@ -74,7 +21,7 @@ afterEach(() => {
 
 describe("apiFetch", () => {
   it("attaches the current access token as Authorization: Bearer", async () => {
-    const { getSession } = createFakeClient({ initialToken: "token-1" });
+    const { getSession } = createFakeSupabaseClient({ sessionToken: "token-1" });
     const fetchMock = vi
       .fn()
       .mockImplementation(
@@ -92,7 +39,7 @@ describe("apiFetch", () => {
   });
 
   it("sends no Authorization header when there is no session", async () => {
-    createFakeClient({ initialToken: null });
+    createFakeSupabaseClient({ sessionToken: null });
     const fetchMock = vi
       .fn()
       .mockImplementation(async () => fakeJsonResponse({ status: 200, body: "{}" }));
@@ -104,7 +51,10 @@ describe("apiFetch", () => {
   });
 
   it("performs exactly one refresh attempt and retries once on 401", async () => {
-    createFakeClient({ initialToken: "expired-token", refreshedToken: "fresh-token" });
+    createFakeSupabaseClient({
+      sessionToken: "expired-token",
+      refreshedToken: "fresh-token",
+    });
     const fetchMock = vi
       .fn()
       .mockImplementation(async (_path: unknown, init?: RequestInit) => {
@@ -123,7 +73,10 @@ describe("apiFetch", () => {
   });
 
   it("throws ApiError 401 when the refresh attempt yields no fresh token", async () => {
-    createFakeClient({ initialToken: "expired-token", refreshedToken: null });
+    createFakeSupabaseClient({
+      sessionToken: "expired-token",
+      refreshedToken: null,
+    });
     const fetchMock = vi
       .fn()
       .mockImplementation(async () => fakeJsonResponse({ status: 401, body: '{}' }));
@@ -135,8 +88,8 @@ describe("apiFetch", () => {
   });
 
   it("refreshes the session and retries on 401 even without an initial token", async () => {
-    const { refreshSession } = createFakeClient({
-      initialToken: null,
+    const { refreshSession } = createFakeSupabaseClient({
+      sessionToken: null,
       refreshedToken: "fresh-token",
     });
     const fetchMock = vi
@@ -174,7 +127,10 @@ describe("apiFetch", () => {
   }
 
   it("resends a one-shot body on the 401 refresh retry", async () => {
-    createFakeClient({ initialToken: "expired-token", refreshedToken: "fresh-token" });
+    createFakeSupabaseClient({
+      sessionToken: "expired-token",
+      refreshedToken: "fresh-token",
+    });
     const bodiesByCall: string[] = [];
     const fetchMock = vi
       .fn()
@@ -201,7 +157,7 @@ describe("apiFetch", () => {
   });
 
   it("surfaces 403 as a deactivation error with the server message", async () => {
-    createFakeClient({ initialToken: "token" });
+    createFakeSupabaseClient({ sessionToken: "token" });
     const fetchMock = vi
       .fn()
       .mockImplementation(async () =>
