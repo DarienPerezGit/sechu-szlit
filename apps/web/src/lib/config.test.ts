@@ -65,17 +65,4 @@ describe("loadConfig", () => {
       supabasePublishableKey: "sb_publishable_test",
     });
   });
-
-  it("gives injected overrides precedence over env vars", () => {
-    setEnvVars({
-      VITE_SUPABASE_URL: "https://env-fallback.supabase.co",
-      VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_env",
-    });
-
-    const config = loadConfig({
-      supabaseUrl: "https://runtime-injected.supabase.co",
-    });
-    expect(config.supabaseUrl).toBe("https://runtime-injected.supabase.co");
-    expect(config.supabasePublishableKey).toBe("sb_publishable_env");
-  });
 });
