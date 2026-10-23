@@ -48,12 +48,39 @@ async function handleResponse<T>(response: Response): Promise<T> {
 }
 
 /**
+ * Buffers one-shot bodies so the request can be resent after a 401 refresh.
+ *
+ * Fetch consumes a stream-like body (anything exposing `getReader`, e.g. a
+ * `ReadableStream`) on the first send, so reusing the same `init.body` for the
+ * retry would fail with "body disturbed or locked". Snapshotting it once into
+ * an `ArrayBuffer` keeps the retry valid; every other body type (string,
+ * ArrayBuffer, Blob, FormData, URLSearchParams, ...) can be resent as-is.
+ */
+async function ensureResendableBody(
+  init: RequestInit,
+): Promise<RequestInit> {
+  const body = init.body;
+  if (
+    body === null ||
+    body === undefined ||
+    typeof body !== "object" ||
+    typeof (body as { getReader?: unknown }).getReader !== "function"
+  ) {
+    return init;
+  }
+  const bufferedBody = await new Response(body as ReadableStream).arrayBuffer();
+  return { ...init, body: bufferedBody };
+}
+
+/**
  * Fetch against the Fastify API with the current Supabase access token.
  *
  * - Always goes through relative `/api/*` paths (same origin); the web app
  *   never talks to domain tables via PostgREST.
- * - On 401, makes exactly one refresh attempt (the token may have expired)
- *   and retries the request once with the fresh token before failing.
+ * - On 401, makes exactly one refresh attempt (the token may have expired,
+ *   even when the initial request went out without a token) and retries the
+ *   request once with the fresh token before failing. Stream-like bodies are
+ *   buffered up front so the retry can resend the same payload.
  */
 export async function apiFetch<T = unknown>(
   path: string,
@@ -63,13 +90,14 @@ export async function apiFetch<T = unknown>(
   const { data } = await client.auth.getSession();
   const sessionToken = data.session?.access_token ?? null;
 
-  const response = await authorizedRequest(path, init, sessionToken);
+  const resendableInit = await ensureResendableBody(init);
+  const response = await authorizedRequest(path, resendableInit, sessionToken);
 
   if (response.status === 401) {
     const { data: refreshed } = await client.auth.refreshSession();
     const freshToken = refreshed.session?.access_token ?? null;
     if (freshToken && freshToken !== sessionToken) {
-      const retry = await authorizedRequest(path, init, freshToken);
+      const retry = await authorizedRequest(path, resendableInit, freshToken);
       return handleResponse<T>(retry);
     }
   }

@@ -134,6 +134,72 @@ describe("apiFetch", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("refreshes the session and retries on 401 even without an initial token", async () => {
+    const { refreshSession } = createFakeClient({
+      initialToken: null,
+      refreshedToken: "fresh-token",
+    });
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async (_path: unknown, init?: RequestInit) => {
+        const headers = new Headers(init?.headers);
+        return headers.get("Authorization") === "Bearer fresh-token"
+          ? fakeJsonResponse({ status: 200, body: '{"ok":true}' })
+          : fakeJsonResponse({ status: 401, body: "{}" });
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await apiFetch<Record<string, unknown>>("/api/catalogos");
+
+    expect(result).toEqual({ ok: true });
+    expect(refreshSession).toHaveBeenCalledTimes(1);
+    expect(fetchCallsWithAuthorization(fetchMock)).toEqual([
+      null,
+      "Bearer fresh-token",
+    ]);
+  });
+
+  /** One-shot body: fetch consumes it, so a raw resend only sees it drained. */
+  function createOneShotBody(text: string): ReadableStream<Uint8Array> {
+    return new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(text));
+        controller.close();
+      },
+    });
+  }
+
+  async function readBodyText(body: unknown): Promise<string> {
+    return new Response(body as ReadableStream).text();
+  }
+
+  it("resends a one-shot body on the 401 refresh retry", async () => {
+    createFakeClient({ initialToken: "expired-token", refreshedToken: "fresh-token" });
+    const bodiesByCall: string[] = [];
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async (_path: unknown, init?: RequestInit) => {
+        const headers = new Headers(init?.headers);
+        if (init?.body !== undefined) {
+          // Simulates fetch consuming a stream body exactly once.
+          bodiesByCall.push(await readBodyText(init.body as ReadableStream));
+        }
+        return headers.get("Authorization") === "Bearer fresh-token"
+          ? fakeJsonResponse({ status: 200, body: '{"ok":true}' })
+          : fakeJsonResponse({ status: 401, body: "{}" });
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await apiFetch<Record<string, unknown>>("/api/items", {
+      method: "POST",
+      body: createOneShotBody("payload"),
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(bodiesByCall).toEqual(["payload", "payload"]);
+  });
+
   it("surfaces 403 as a deactivation error with the server message", async () => {
     createFakeClient({ initialToken: "token" });
     const fetchMock = vi
