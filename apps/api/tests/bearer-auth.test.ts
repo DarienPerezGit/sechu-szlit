@@ -24,7 +24,6 @@ describe("Issue #29: Bearer Supabase authentication & dynamic authorization", as
   async function createApp(supabase: SupabaseClient | null = null) {
     return buildApp({
       db,
-      cookieSecret: "test-secret-32-chars-long-minimum!",
       environment: "test",
       supabase,
     });

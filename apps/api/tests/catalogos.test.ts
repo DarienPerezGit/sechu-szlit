@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/app.js";
-import { createTestDatabase } from "./helpers/db.js";
+import { createTestDatabase, createTestSupabaseClient } from "./helpers/db.js";
 import { sectores, estadosCaso, tiposAudiencia, type Database } from "@sechub/db";
 import { eq } from "drizzle-orm";
 
@@ -27,8 +27,8 @@ describe("catalogos API", async () => {
   async function createApp() {
     return buildApp({
       db,
-      cookieSecret: "test-secret",
       environment: "test",
+      supabase: createTestSupabaseClient(),
     });
   }
 

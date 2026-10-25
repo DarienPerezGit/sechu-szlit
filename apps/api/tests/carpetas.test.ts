@@ -4,6 +4,7 @@ import { sectores, estadosCaso, carpetas, bitacoraCarpetas, type Database } from
 import { buildApp } from "../src/app.js";
 import {
   createTestDatabase,
+  createTestSupabaseClient,
   resetDatabase,
   seedUser,
 } from "./helpers/db.js";
@@ -21,23 +22,12 @@ describe("carpetas API", async () => {
   async function createApp() {
     return buildApp({
       db,
-      cookieSecret: "test-secret",
       environment: "test",
+      supabase: createTestSupabaseClient(),
     });
   }
 
-  async function loginUser(app: any, userCredentials: any) {
-    const loginResponse = await app.inject({
-      method: "POST",
-      url: "/api/auth/login",
-      payload: {
-        email: userCredentials.email,
-        password: userCredentials.password,
-      },
-    });
-    const cookie = loginResponse.headers["set-cookie"];
-    return Array.isArray(cookie) ? cookie.join("; ") : cookie;
-  }
+  async function loginUser(_app: any, userCredentials: { authHeader: string }) { return userCredentials.authHeader; }
 
   it("returns 401 when not authenticated for CRUD endpoints", async () => {
     const app = await createApp();
@@ -87,7 +77,7 @@ describe("carpetas API", async () => {
     const postRes = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estado.id,
@@ -116,7 +106,7 @@ describe("carpetas API", async () => {
     const listRes = await app.inject({
       method: "GET",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
     });
     expect(listRes.statusCode).toBe(200);
     const list = listRes.json();
@@ -127,7 +117,7 @@ describe("carpetas API", async () => {
     const getOneRes = await app.inject({
       method: "GET",
       url: `/api/carpetas/${created.id}`,
-      headers: { cookie },
+      headers: { authorization: cookie },
     });
     expect(getOneRes.statusCode).toBe(200);
     expect(getOneRes.json().id).toBe(created.id);
@@ -136,7 +126,7 @@ describe("carpetas API", async () => {
     const patchRes = await app.inject({
       method: "PATCH",
       url: `/api/carpetas/${created.id}`,
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         version: 1,
         caratula: "Pérez c/ Szlit S.R.L.",
@@ -159,7 +149,7 @@ describe("carpetas API", async () => {
     const patchResStale = await app.inject({
       method: "PATCH",
       url: `/api/carpetas/${created.id}`,
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         version: 1, // Stale version (current is 2)
         caratula: "Pérez c/ Szlit S.A.",

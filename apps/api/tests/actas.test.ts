@@ -15,7 +15,7 @@ import {
   usuariosSectores,
 } from "@sechub/db";
 import { buildApp } from "../src/app.js";
-import { createTestDatabase, getDatabaseUrl, resetDatabase, seedUser } from "./helpers/db.js";
+import { createTestDatabase, createTestSupabaseClient, getDatabaseUrl, resetDatabase, seedUser } from "./helpers/db.js";
 
 describe("actas API", async () => {
   const db = await createTestDatabase();
@@ -27,18 +27,10 @@ describe("actas API", async () => {
   });
 
   async function createApp() {
-    return buildApp({ db, cookieSecret: "test-secret", environment: "test" });
+    return buildApp({ db, environment: "test", supabase: createTestSupabaseClient() });
   }
 
-  async function loginUser(app: Awaited<ReturnType<typeof buildApp>>, credentials: { email: string; password: string }) {
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/auth/login",
-      payload: credentials,
-    });
-    const cookie = response.headers["set-cookie"];
-    return Array.isArray(cookie) ? cookie.join("; ") : cookie;
-  }
+  async function loginUser(_app: any, userCredentials: { authHeader: string }) { return userCredentials.authHeader; }
 
   async function createLinkScenario(label: string) {
     const app = await createApp();
@@ -52,7 +44,7 @@ describe("actas API", async () => {
     const carpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estadoCaso.id,
@@ -65,7 +57,7 @@ describe("actas API", async () => {
     const audienciaResponse = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         carpetaId: carpeta.id,
         abogadoId: user.id,
@@ -77,7 +69,7 @@ describe("actas API", async () => {
     const actaResponse = await app.inject({
       method: "POST",
       url: "/api/actas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: { tipoActaId: tipoActa.id, estadoActaId: estadoActa.id },
     });
     return {
@@ -119,7 +111,7 @@ describe("actas API", async () => {
     const otherCarpetaResponse = await scenario.app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie: scenario.cookie },
+      headers: { authorization: scenario.cookie },
       payload: {
         sectorActualId: otherSector.id,
         estadoCasoId: estadoCaso.id,
@@ -132,7 +124,7 @@ describe("actas API", async () => {
     const otherAudienciaResponse = await scenario.app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: scenario.cookie },
+      headers: { authorization: scenario.cookie },
       payload: {
         carpetaId: otherCarpeta.id,
         abogadoId: scenario.user.id,
@@ -144,7 +136,7 @@ describe("actas API", async () => {
     const response = await scenario.app.inject({
       method: "PATCH",
       url: `/api/actas/${scenario.acta.id}/vincular`,
-      headers: { cookie: scenario.cookie },
+      headers: { authorization: scenario.cookie },
       payload: { carpetaId: scenario.carpeta.id, audienciaId: otherAudienciaResponse.json().id },
     });
     const [unchangedActa] = await db.select().from(actas).where(eq(actas.id, scenario.acta.id));
@@ -163,7 +155,7 @@ describe("actas API", async () => {
     const response = await scenario.app.inject({
       method: "PATCH",
       url: `/api/actas/${scenario.acta.id}/vincular`,
-      headers: { cookie: scenario.cookie },
+      headers: { authorization: scenario.cookie },
       payload: { carpetaId: scenario.carpeta.id, audienciaId: scenario.audiencia.id },
     });
     const [unchangedActa] = await db.select().from(actas).where(eq(actas.id, scenario.acta.id));
@@ -179,7 +171,7 @@ describe("actas API", async () => {
     const secondAudienciaResponse = await scenario.app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: scenario.cookie },
+      headers: { authorization: scenario.cookie },
       payload: {
         carpetaId: scenario.carpeta.id,
         abogadoId: scenario.user.id,
@@ -191,7 +183,7 @@ describe("actas API", async () => {
     const response = await scenario.app.inject({
       method: "PATCH",
       url: `/api/actas/${scenario.acta.id}/vincular`,
-      headers: { cookie: scenario.cookie },
+      headers: { authorization: scenario.cookie },
       payload: { carpetaId: scenario.carpeta.id, audienciaId: scenario.audiencia.id },
     });
     const [selected] = await db.select().from(audiencias).where(eq(audiencias.id, scenario.audiencia.id));
@@ -211,7 +203,7 @@ describe("actas API", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/actas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         expediente: `ACTA-API-${Date.now()}`,
         tipoActaId: tipo.id,
@@ -226,7 +218,7 @@ describe("actas API", async () => {
     const orphanResponse = await app.inject({
       method: "GET",
       url: "/api/actas/orphan",
-      headers: { cookie },
+      headers: { authorization: cookie },
     });
 
     expect(orphanResponse.statusCode).toBe(200);
@@ -244,7 +236,7 @@ describe("actas API", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/actas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         carpetaId: "",
         tipoActaId: tipoActa.id,
@@ -268,7 +260,7 @@ describe("actas API", async () => {
     const carpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estadoCaso.id,
@@ -282,7 +274,7 @@ describe("actas API", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/actas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         carpetaId: carpeta.id,
         tipoActaId: tipoActa.id,
@@ -310,7 +302,7 @@ describe("actas API", async () => {
     const carpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estadoCaso.id,
@@ -325,7 +317,7 @@ describe("actas API", async () => {
     const audienciaResponse = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         carpetaId: carpeta.id,
         abogadoId: user.id,
@@ -339,7 +331,7 @@ describe("actas API", async () => {
     const actaResponse = await app.inject({
       method: "POST",
       url: "/api/actas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         expediente: carpeta.expediente,
         tipoActaId: tipoActa.id,
@@ -352,14 +344,14 @@ describe("actas API", async () => {
     const linkResponse = await app.inject({
       method: "PATCH",
       url: `/api/actas/${actaResponse.json().id}/vincular`,
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: { carpetaId: carpeta.id, audienciaId: audienciaResponse.json().id },
     });
     expect(linkResponse.statusCode).toBe(200);
     const retryResponse = await app.inject({
       method: "PATCH",
       url: `/api/actas/${actaResponse.json().id}/vincular`,
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: { carpetaId: carpeta.id, audienciaId: audienciaResponse.json().id },
     });
 
@@ -421,7 +413,7 @@ describe("actas API", async () => {
     const carpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estadoCaso.id,
@@ -434,7 +426,7 @@ describe("actas API", async () => {
     const audienciaResponse = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: {
         carpetaId: carpeta.id,
         abogadoId: admin.id,
@@ -446,26 +438,26 @@ describe("actas API", async () => {
     const actaResponse = await app.inject({
       method: "POST",
       url: "/api/actas",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: { tipoActaId: tipoActa.id, estadoActaId: estadoActa.id },
     });
 
     const createResponse = await app.inject({
       method: "POST",
       url: "/api/actas",
-      headers: { cookie: lecturaCookie },
+      headers: { authorization: lecturaCookie },
       payload: { tipoActaId: tipoActa.id, estadoActaId: estadoActa.id },
     });
     const linkResponse = await app.inject({
       method: "PATCH",
       url: `/api/actas/${actaResponse.json().id}/vincular`,
-      headers: { cookie: lecturaCookie },
+      headers: { authorization: lecturaCookie },
       payload: { carpetaId: carpeta.id, audienciaId: audienciaResponse.json().id },
     });
     const orphanResponse = await app.inject({
       method: "GET",
       url: "/api/actas/orphan",
-      headers: { cookie: lecturaCookie },
+      headers: { authorization: lecturaCookie },
     });
 
     expect(createResponse.statusCode).toBe(403);
@@ -488,19 +480,19 @@ describe("actas API", async () => {
     const createResponse = await app.inject({
       method: "POST",
       url: "/api/actas",
-      headers: { cookie: firstCookie },
+      headers: { authorization: firstCookie },
       payload: { tipoActaId: tipoActa.id, estadoActaId: estadoActa.id, expediente: `ACTA-TENANT-${Date.now()}` },
     });
     const actaId = createResponse.json().id;
     const orphanResponse = await app.inject({
       method: "GET",
       url: "/api/actas/orphan",
-      headers: { cookie: secondCookie },
+      headers: { authorization: secondCookie },
     });
     const linkResponse = await app.inject({
       method: "PATCH",
       url: `/api/actas/${actaId}/vincular`,
-      headers: { cookie: secondCookie },
+      headers: { authorization: secondCookie },
       payload: {
         carpetaId: "00000000-0000-0000-0000-000000000000",
         audienciaId: "00000000-0000-0000-0000-000000000000",
@@ -532,7 +524,7 @@ describe("actas API", async () => {
     const carpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estadoCaso.id,
@@ -545,7 +537,7 @@ describe("actas API", async () => {
     const audienciaResponse = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         carpetaId: carpeta.id,
         abogadoId: user.id,
@@ -557,13 +549,13 @@ describe("actas API", async () => {
     const actaResponse = await app.inject({
       method: "POST",
       url: "/api/actas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: { tipoActaId: tipoActa.id, estadoActaId: estadoActa.id },
     });
     const linkResponse = await app.inject({
       method: "PATCH",
       url: `/api/actas/${actaResponse.json().id}/vincular`,
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: { carpetaId: carpeta.id, audienciaId: audienciaResponse.json().id },
     });
     const [expectedEstado] = await db.select().from(estadosCaso).where(eq(estadosCaso.codigo, expectedEstadoCodigo));
@@ -585,7 +577,7 @@ describe("actas API", async () => {
     const carpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estadoCaso.id,
@@ -598,7 +590,7 @@ describe("actas API", async () => {
     const audienciaResponse = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         carpetaId: carpeta.id,
         abogadoId: user.id,
@@ -610,14 +602,14 @@ describe("actas API", async () => {
     const actaResponse = await app.inject({
       method: "POST",
       url: "/api/actas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: { tipoActaId: tipoActa.id, estadoActaId: estadoActa.id },
     });
 
     const linkResponse = await app.inject({
       method: "PATCH",
       url: `/api/actas/${actaResponse.json().id}/vincular`,
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         carpetaId: carpeta.id,
         audienciaId: "00000000-0000-0000-0000-000000000000",
@@ -659,7 +651,7 @@ describe("actas API", async () => {
       const carpetaResponse = await app.inject({
         method: "POST",
         url: "/api/carpetas",
-        headers: { cookie: adminCookie },
+        headers: { authorization: adminCookie },
         payload: {
           sectorActualId: sectorId,
           estadoCasoId: estadoCaso.id,
@@ -672,7 +664,7 @@ describe("actas API", async () => {
       const audienciaResponse = await app.inject({
         method: "POST",
         url: "/api/audiencias",
-        headers: { cookie: adminCookie },
+        headers: { authorization: adminCookie },
         payload: {
           carpetaId: carpeta.id,
           abogadoId: admin.id,
@@ -684,7 +676,7 @@ describe("actas API", async () => {
       const actaResponse = await app.inject({
         method: "POST",
         url: "/api/actas",
-        headers: { cookie: adminCookie },
+        headers: { authorization: adminCookie },
         payload: { tipoActaId: tipoActa.id, estadoActaId: estadoActa.id },
       });
       return { carpeta, audiencia: audienciaResponse.json(), acta: actaResponse.json() };
@@ -694,7 +686,7 @@ describe("actas API", async () => {
     const allowedResponse = await app.inject({
       method: "PATCH",
       url: `/api/actas/${assigned.acta.id}/vincular`,
-      headers: { cookie: managerCookie },
+      headers: { authorization: managerCookie },
       payload: { carpetaId: assigned.carpeta.id, audienciaId: assigned.audiencia.id },
     });
     expect(allowedResponse.statusCode).toBe(200);
@@ -703,7 +695,7 @@ describe("actas API", async () => {
     const deniedResponse = await app.inject({
       method: "PATCH",
       url: `/api/actas/${denied.acta.id}/vincular`,
-      headers: { cookie: managerCookie },
+      headers: { authorization: managerCookie },
       payload: { carpetaId: denied.carpeta.id, audienciaId: denied.audiencia.id },
     });
     const [unchangedDeniedActa] = await db.select().from(actas).where(eq(actas.id, denied.acta.id));
@@ -735,7 +727,7 @@ describe("actas API", async () => {
     const carpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: {
         sectorActualId: oldSector.id,
         estadoCasoId: estadoCaso.id,
@@ -748,7 +740,7 @@ describe("actas API", async () => {
     const audienciaResponse = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: {
         carpetaId: carpeta.id,
         abogadoId: admin.id,
@@ -760,7 +752,7 @@ describe("actas API", async () => {
     const actaResponse = await app.inject({
       method: "POST",
       url: "/api/actas",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: { tipoActaId: tipoActa.id, estadoActaId: estadoActa.id },
     });
 
@@ -774,7 +766,7 @@ describe("actas API", async () => {
       const linkPromise = app.inject({
         method: "PATCH",
         url: `/api/actas/${actaResponse.json().id}/vincular`,
-        headers: { cookie: managerCookie },
+        headers: { authorization: managerCookie },
         payload: { carpetaId: carpeta.id, audienciaId: audienciaResponse.json().id },
       });
       let actaUpdateBlocked = false;
@@ -820,7 +812,7 @@ describe("actas API", async () => {
     const secondAudienciaResponse = await scenario.app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: scenario.cookie },
+      headers: { authorization: scenario.cookie },
       payload: {
         carpetaId: scenario.carpeta.id,
         abogadoId: scenario.user.id,
@@ -834,20 +826,20 @@ describe("actas API", async () => {
     const secondActaResponse = await scenario.app.inject({
       method: "POST",
       url: "/api/actas",
-      headers: { cookie: scenario.cookie },
+      headers: { authorization: scenario.cookie },
       payload: { tipoActaId: tipoActa.id, estadoActaId: estadoActa.id },
     });
     const responses = await Promise.all([
       scenario.app.inject({
         method: "PATCH",
         url: `/api/actas/${scenario.acta.id}/vincular`,
-        headers: { cookie: scenario.cookie },
+        headers: { authorization: scenario.cookie },
         payload: { carpetaId: scenario.carpeta.id, audienciaId: scenario.audiencia.id },
       }),
       scenario.app.inject({
         method: "PATCH",
         url: `/api/actas/${secondActaResponse.json().id}/vincular`,
-        headers: { cookie: scenario.cookie },
+        headers: { authorization: scenario.cookie },
         payload: { carpetaId: scenario.carpeta.id, audienciaId: secondAudienciaResponse.json().id },
       }),
     ]);
@@ -878,7 +870,7 @@ describe("actas API", async () => {
     const carpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estadoCaso.id,
@@ -891,7 +883,7 @@ describe("actas API", async () => {
     const audienciaResponse = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         carpetaId: carpeta.id,
         abogadoId: user.id,
@@ -903,13 +895,13 @@ describe("actas API", async () => {
     const actaResponse = await app.inject({
       method: "POST",
       url: "/api/actas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: { tipoActaId: tipoActa.id, estadoActaId: estadoActa.id },
     });
     const url = `/api/actas/${actaResponse.json().id}/vincular`;
     const responses = await Promise.all([
-      app.inject({ method: "PATCH", url, headers: { cookie }, payload: { carpetaId: carpeta.id, audienciaId: audienciaResponse.json().id } }),
-      app.inject({ method: "PATCH", url, headers: { cookie }, payload: { carpetaId: carpeta.id, audienciaId: audienciaResponse.json().id } }),
+      app.inject({ method: "PATCH", url, headers: { authorization: cookie }, payload: { carpetaId: carpeta.id, audienciaId: audienciaResponse.json().id } }),
+      app.inject({ method: "PATCH", url, headers: { authorization: cookie }, payload: { carpetaId: carpeta.id, audienciaId: audienciaResponse.json().id } }),
     ]);
     const [updatedCarpeta] = await db.select().from(carpetas).where(eq(carpetas.id, carpeta.id));
     const [updatedAudiencia] = await db.select().from(audiencias).where(eq(audiencias.id, audienciaResponse.json().id));

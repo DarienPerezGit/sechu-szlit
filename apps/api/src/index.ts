@@ -13,7 +13,6 @@ config({ path: join(envDir, ".env.local"), override: true });
 if (explicitDatabaseUrl !== undefined) process.env.DATABASE_URL = explicitDatabaseUrl;
 
 const port = Number(process.env.PORT ?? 3000);
-const cookieSecret = process.env.COOKIE_SECRET ?? "change-me-in-production";
 const environment =
   (process.env.NODE_ENV as "development" | "production" | "test") ?? "development";
 
@@ -23,13 +22,11 @@ const supabaseAnonKey = process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.SUPA
 export async function createServer(
   connectionString: string,
   serverEnvironment = environment,
-  secret = cookieSecret,
 ) {
   const db = createDatabase(connectionString);
   const supabase = createSupabaseClient(supabaseUrl, supabaseAnonKey);
   return buildApp({
     db,
-    cookieSecret: secret,
     environment: serverEnvironment,
     supabase,
   });

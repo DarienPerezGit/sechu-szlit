@@ -14,6 +14,7 @@ import {
 import { buildApp } from "../src/app.js";
 import {
   createTestDatabase,
+  createTestSupabaseClient,
   resetDatabase,
   seedUser,
 } from "./helpers/db.js";
@@ -32,23 +33,12 @@ describe("audiencias API", async () => {
   async function createApp() {
     return buildApp({
       db,
-      cookieSecret: "test-secret",
       environment: "test",
+      supabase: createTestSupabaseClient(),
     });
   }
 
-  async function loginUser(app: any, userCredentials: any) {
-    const loginResponse = await app.inject({
-      method: "POST",
-      url: "/api/auth/login",
-      payload: {
-        email: userCredentials.email,
-        password: userCredentials.password,
-      },
-    });
-    const cookie = loginResponse.headers["set-cookie"];
-    return Array.isArray(cookie) ? cookie.join("; ") : cookie;
-  }
+  async function loginUser(_app: any, userCredentials: { authHeader: string }) { return userCredentials.authHeader; }
 
   async function getDbUser(email: string) {
     const [u] = await db
@@ -111,7 +101,7 @@ describe("audiencias API", async () => {
     const postRes = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         abogadoId: "00000000-0000-0000-0000-000000000000",
         fecha: "2026-08-10",
@@ -139,7 +129,7 @@ describe("audiencias API", async () => {
     const createRes = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estado.id,
@@ -155,7 +145,7 @@ describe("audiencias API", async () => {
     const postRes = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         carpetaId: carpeta.id,
         abogadoId: dbUser.id,
@@ -176,7 +166,7 @@ describe("audiencias API", async () => {
     const postRes2 = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         abogadoId: dbUser.id,
         fecha: "2026-08-10",
@@ -190,7 +180,7 @@ describe("audiencias API", async () => {
     const agendaRes = await app.inject({
       method: "GET",
       url: "/api/audiencias?fecha=2026-08-10",
-      headers: { cookie },
+      headers: { authorization: cookie },
     });
     expect(agendaRes.statusCode).toBe(200);
     const agenda = agendaRes.json();
@@ -225,7 +215,7 @@ describe("audiencias API", async () => {
     const postRes = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         abogadoId: dbUser.id,
         fecha: "2026-08-11",
@@ -244,7 +234,7 @@ describe("audiencias API", async () => {
     const carpetaRes = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estado.id,
@@ -258,7 +248,7 @@ describe("audiencias API", async () => {
     await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         carpetaId: carpeta.id,
         abogadoId: dbUser.id,
@@ -272,7 +262,7 @@ describe("audiencias API", async () => {
     const orphanRes = await app.inject({
       method: "GET",
       url: "/api/audiencias/orphan",
-      headers: { cookie },
+      headers: { authorization: cookie },
     });
     expect(orphanRes.statusCode).toBe(200);
     const orphans = orphanRes.json();
@@ -299,7 +289,7 @@ describe("audiencias API", async () => {
     const postRes = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         abogadoId: dbUser.id,
         fecha: "2026-08-12",
@@ -315,7 +305,7 @@ describe("audiencias API", async () => {
     const carpetaRes = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estado.id,
@@ -331,7 +321,7 @@ describe("audiencias API", async () => {
     const linkRes = await app.inject({
       method: "PATCH",
       url: `/api/audiencias/${orphan.id}/vincular`,
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: { carpetaId: carpeta.id },
     });
     expect(linkRes.statusCode).toBe(200);
@@ -354,7 +344,7 @@ describe("audiencias API", async () => {
     const linkAgainRes = await app.inject({
       method: "PATCH",
       url: `/api/audiencias/${orphan.id}/vincular`,
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: { carpetaId: carpeta.id },
     });
     expect(linkAgainRes.statusCode).toBe(400);
@@ -403,7 +393,7 @@ describe("audiencias API", async () => {
     const postRes = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: cookie1 },
+      headers: { authorization: cookie1 },
       payload: {
         abogadoId: dbUser1.id,
         fecha: "2026-08-13",
@@ -418,7 +408,7 @@ describe("audiencias API", async () => {
     const linkRes = await app.inject({
       method: "PATCH",
       url: `/api/audiencias/${audienciaUser1.id}/vincular`,
-      headers: { cookie: cookie2 },
+      headers: { authorization: cookie2 },
       payload: {
         carpetaId: "00000000-0000-0000-0000-000000000000",
       },
@@ -429,7 +419,7 @@ describe("audiencias API", async () => {
     const orphanRes = await app.inject({
       method: "GET",
       url: "/api/audiencias/orphan",
-      headers: { cookie: cookie2 },
+      headers: { authorization: cookie2 },
     });
     expect(orphanRes.statusCode).toBe(200);
     expect(orphanRes.json()).toHaveLength(0);
@@ -438,7 +428,7 @@ describe("audiencias API", async () => {
     const orphanRes1 = await app.inject({
       method: "GET",
       url: "/api/audiencias/orphan",
-      headers: { cookie: cookie1 },
+      headers: { authorization: cookie1 },
     });
     expect(orphanRes1.statusCode).toBe(200);
     expect(orphanRes1.json()).toHaveLength(1);
