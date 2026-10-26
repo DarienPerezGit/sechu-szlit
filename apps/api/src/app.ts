@@ -45,6 +45,10 @@ export async function buildApp(deps: AppDependencies) {
     prefix: "/",
   });
 
+  app.get("/api/health", async () => {
+    return { status: "ok", timestamp: new Date().toISOString() };
+  });
+
   app.register(authRoutes, {
     prefix: "/api/auth",
     db: deps.db,
