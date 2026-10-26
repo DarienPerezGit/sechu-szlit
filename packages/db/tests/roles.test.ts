@@ -46,7 +46,6 @@ describe("roles schema", () => {
     const [estudio] = await db.select().from(estudios).limit(1);
     const [user] = await db.insert(usuarios).values({
       email: `roles-missing-sector-${Date.now()}@test.com`,
-      passwordHash: "fake-hash",
       estudioId: estudio.id,
     }).returning();
     createdUserIds.push(user.id);
@@ -77,7 +76,6 @@ describe("roles schema", () => {
     const [sector] = await db.select().from(sectores).limit(1);
     const [user] = await db.insert(usuarios).values({
       email: `roles-${Date.now()}@test.com`,
-      passwordHash: "fake-hash",
       estudioId: estudio.id,
     }).returning();
     createdUserIds.push(user.id);

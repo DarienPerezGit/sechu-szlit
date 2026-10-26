@@ -13,7 +13,7 @@ import {
   audiencias,
 } from "../../../packages/db/src/index.js";
 import { buildApp } from "../src/app.js";
-import { createTestDatabase, resetDatabase, seedUser } from "./helpers/db.js";
+import { createTestDatabase, createTestSupabaseClient, resetDatabase, seedUser } from "./helpers/db.js";
 
 describe("permisos por rol y sector API", async () => {
   const db = await createTestDatabase();
@@ -25,20 +25,12 @@ describe("permisos por rol y sector API", async () => {
   async function createApp() {
     return buildApp({
       db,
-      cookieSecret: "test-secret",
       environment: "test",
+      supabase: createTestSupabaseClient(),
     });
   }
 
-  async function loginUser(app: Awaited<ReturnType<typeof buildApp>>, credentials: { email: string; password: string }) {
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/auth/login",
-      payload: credentials,
-    });
-    const cookie = response.headers["set-cookie"];
-    return Array.isArray(cookie) ? cookie.join("; ") : cookie;
-  }
+  async function loginUser(_app: any, userCredentials: { authHeader: string }) { return userCredentials.authHeader; }
 
   async function assignSector(email: string, sectorId: number) {
     const [user] = await db.select().from(usuarios).where(eq(usuarios.email, email)).limit(1);
@@ -68,7 +60,7 @@ describe("permisos por rol y sector API", async () => {
     const lecturaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload,
     });
     expect(lecturaResponse.statusCode).toBe(403);
@@ -79,7 +71,7 @@ describe("permisos por rol y sector API", async () => {
     const adminResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload,
     });
     expect(adminResponse.statusCode).toBe(201);
@@ -103,7 +95,7 @@ describe("permisos por rol y sector API", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie },
+      headers: { authorization: cookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estado.id,
@@ -134,7 +126,7 @@ describe("permisos por rol y sector API", async () => {
     const adminResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload,
     });
     expect(adminResponse.statusCode).toBe(201);
@@ -142,7 +134,7 @@ describe("permisos por rol y sector API", async () => {
     const lecturaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie: lecturaCookie },
+      headers: { authorization: lecturaCookie },
       payload: { ...payload, expediente: `${payload.expediente}-lectura` },
     });
     expect(lecturaResponse.statusCode).toBe(403);
@@ -165,7 +157,7 @@ describe("permisos por rol y sector API", async () => {
     const carpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estado.id,
@@ -180,7 +172,7 @@ describe("permisos por rol y sector API", async () => {
     const lecturaResponse = await app.inject({
       method: "PATCH",
       url: "/api/carpetas/not-a-uuid",
-      headers: { cookie: lecturaCookie },
+      headers: { authorization: lecturaCookie },
       payload: { version: 1 },
     });
     expect(lecturaResponse.statusCode).toBe(403);
@@ -188,7 +180,7 @@ describe("permisos por rol y sector API", async () => {
     const patchResponse = await app.inject({
       method: "PATCH",
       url: `/api/carpetas/${carpeta.id}`,
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: { version: carpeta.version, caratula: "Carpeta actualizada" },
     });
     expect(patchResponse.statusCode).toBe(200);
@@ -196,7 +188,7 @@ describe("permisos por rol y sector API", async () => {
     const orphanResponse = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: {
         abogadoId: admin.id,
         fecha: "2026-10-12",
@@ -209,7 +201,7 @@ describe("permisos por rol y sector API", async () => {
     const linkResponse = await app.inject({
       method: "PATCH",
       url: `/api/audiencias/${orphanResponse.json().id}/vincular`,
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: { carpetaId: carpeta.id },
     });
     expect(linkResponse.statusCode).toBe(200);
@@ -233,7 +225,7 @@ describe("permisos por rol y sector API", async () => {
     const managerCarpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie: managerCookie },
+      headers: { authorization: managerCookie },
       payload: {
         sectorActualId: ownSector.id,
         estadoCasoId: estado.id,
@@ -248,7 +240,7 @@ describe("permisos por rol y sector API", async () => {
     const otherCarpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: {
         sectorActualId: otherSector.id,
         estadoCasoId: estado.id,
@@ -263,7 +255,7 @@ describe("permisos por rol y sector API", async () => {
     const createOtherResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie: managerCookie },
+      headers: { authorization: managerCookie },
       payload: {
         sectorActualId: otherSector.id,
         estadoCasoId: estado.id,
@@ -277,7 +269,7 @@ describe("permisos por rol y sector API", async () => {
     const transitionResponse = await app.inject({
       method: "PATCH",
       url: `/api/carpetas/${managerCarpeta.id}`,
-      headers: { cookie: managerCookie },
+      headers: { authorization: managerCookie },
       payload: { version: managerCarpeta.version, sectorActualId: otherSector.id },
     });
     expect(transitionResponse.statusCode).toBe(200);
@@ -285,7 +277,7 @@ describe("permisos por rol y sector API", async () => {
     const updateOtherResponse = await app.inject({
       method: "PATCH",
       url: `/api/carpetas/${otherCarpeta.id}`,
-      headers: { cookie: managerCookie },
+      headers: { authorization: managerCookie },
       payload: { version: otherCarpeta.version, caratula: "No autorizada" },
     });
     expect(updateOtherResponse.statusCode).toBe(403);
@@ -293,7 +285,7 @@ describe("permisos por rol y sector API", async () => {
     const linkedCreationResponse = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: managerCookie },
+      headers: { authorization: managerCookie },
       payload: {
         carpetaId: otherCarpeta.id,
         abogadoId: admin.id,
@@ -307,7 +299,7 @@ describe("permisos por rol y sector API", async () => {
     const orphanResponse = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: managerCookie },
+      headers: { authorization: managerCookie },
       payload: {
         abogadoId: admin.id,
         fecha: "2026-10-10",
@@ -320,7 +312,7 @@ describe("permisos por rol y sector API", async () => {
     const linkResponse = await app.inject({
       method: "PATCH",
       url: `/api/audiencias/${orphanResponse.json().id}/vincular`,
-      headers: { cookie: managerCookie },
+      headers: { authorization: managerCookie },
       payload: { carpetaId: otherCarpeta.id },
     });
     expect(linkResponse.statusCode).toBe(200);
@@ -328,7 +320,7 @@ describe("permisos por rol y sector API", async () => {
     const linkedWriteResponse = await app.inject({
       method: "PATCH",
       url: `/api/audiencias/${orphanResponse.json().id}/vincular`,
-      headers: { cookie: managerCookie },
+      headers: { authorization: managerCookie },
       payload: { carpetaId: otherCarpeta.id },
     });
     expect(linkedWriteResponse.statusCode).toBe(403);
@@ -355,7 +347,7 @@ describe("permisos por rol y sector API", async () => {
     const carpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: {
         sectorActualId: otherSector.id,
         estadoCasoId: estado.id,
@@ -377,7 +369,7 @@ describe("permisos por rol y sector API", async () => {
     const lecturaResponse = await app.inject({
       method: "PATCH",
       url: `/api/carpetas/${carpeta.id}`,
-      headers: { cookie: lecturaCookie },
+      headers: { authorization: lecturaCookie },
       payload: { version: carpeta.version, empleadorId: "invalid-empleador-id" },
     });
     expect(lecturaResponse.statusCode).toBe(403);
@@ -385,7 +377,7 @@ describe("permisos por rol y sector API", async () => {
     const managerResponse = await app.inject({
       method: "PATCH",
       url: `/api/carpetas/${carpeta.id}`,
-      headers: { cookie: managerCookie },
+      headers: { authorization: managerCookie },
       payload: {
         version: carpeta.version,
         empleadorId: foreignEmpleador.id,
@@ -406,7 +398,7 @@ describe("permisos por rol y sector API", async () => {
     const carpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estado.id,
@@ -421,7 +413,7 @@ describe("permisos por rol y sector API", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: {
         carpetaId: carpeta.id,
         abogadoId: admin.id,
@@ -452,7 +444,7 @@ describe("permisos por rol y sector API", async () => {
     const carpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie: managerCookie },
+      headers: { authorization: managerCookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estado.id,
@@ -467,7 +459,7 @@ describe("permisos por rol y sector API", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: managerCookie },
+      headers: { authorization: managerCookie },
       payload: {
         carpetaId: carpeta.id,
         abogadoId: manager.id,
@@ -500,7 +492,7 @@ describe("permisos por rol y sector API", async () => {
     const carpetaResponse = await app.inject({
       method: "POST",
       url: "/api/carpetas",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: {
         sectorActualId: sector.id,
         estadoCasoId: estado.id,
@@ -514,7 +506,7 @@ describe("permisos por rol y sector API", async () => {
     const orphanResponse = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: adminCookie },
+      headers: { authorization: adminCookie },
       payload: {
         abogadoId: admin.id,
         fecha: "2026-10-11",
@@ -527,20 +519,20 @@ describe("permisos por rol y sector API", async () => {
     const carpetasReadResponse = await app.inject({
       method: "GET",
       url: "/api/carpetas",
-      headers: { cookie: lecturaCookie },
+      headers: { authorization: lecturaCookie },
     });
     expect(carpetasReadResponse.statusCode).toBe(200);
     const agendaReadResponse = await app.inject({
       method: "GET",
       url: "/api/audiencias?fecha=2026-10-11",
-      headers: { cookie: lecturaCookie },
+      headers: { authorization: lecturaCookie },
     });
     expect(agendaReadResponse.statusCode).toBe(200);
 
     const orphanWriteResponse = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: lecturaCookie },
+      headers: { authorization: lecturaCookie },
       payload: {
         abogadoId: admin.id,
         fecha: "2026-10-11",
@@ -553,7 +545,7 @@ describe("permisos por rol y sector API", async () => {
     const linkedWriteResponse = await app.inject({
       method: "POST",
       url: "/api/audiencias",
-      headers: { cookie: lecturaCookie },
+      headers: { authorization: lecturaCookie },
       payload: {
         carpetaId: carpeta.id,
         abogadoId: admin.id,
@@ -567,7 +559,7 @@ describe("permisos por rol y sector API", async () => {
     const orphanLinkResponse = await app.inject({
       method: "PATCH",
       url: `/api/audiencias/${orphanResponse.json().id}/vincular`,
-      headers: { cookie: lecturaCookie },
+      headers: { authorization: lecturaCookie },
       payload: { carpetaId: carpeta.id },
     });
     expect(orphanLinkResponse.statusCode).toBe(403);

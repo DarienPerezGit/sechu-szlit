@@ -1,4 +1,3 @@
-import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import { dirname, join } from "node:path";
@@ -19,16 +18,13 @@ declare module "fastify" {
 
 export interface AppDependencies {
   db: Database;
-  cookieSecret: string;
   environment: "development" | "production" | "test";
   webRoot?: string;
-  /** Supabase client for Bearer token validation. When omitted or null, Bearer auth
-   *  is rejected and the app falls back to session cookies (dev only). */
+  /** Supabase client for Bearer token validation. */
   supabase?: SupabaseClient | null;
 }
 
 export async function buildApp(deps: AppDependencies) {
-  const isProduction = deps.environment === "production";
   const supabase = deps.supabase ?? null;
 
   const app = Fastify({
@@ -36,16 +32,6 @@ export async function buildApp(deps: AppDependencies) {
   });
 
   app.decorate("supabase", supabase);
-
-  await app.register(fastifyCookie, {
-    secret: deps.cookieSecret,
-    parseOptions: {
-      httpOnly: true,
-      sameSite: "strict",
-      path: "/",
-      secure: isProduction,
-    },
-  });
 
   await app.register(fastifyStatic, {
     root: deps.webRoot ??
@@ -62,7 +48,6 @@ export async function buildApp(deps: AppDependencies) {
   app.register(authRoutes, {
     prefix: "/api/auth",
     db: deps.db,
-    isProduction,
   });
 
   app.register(catalogosRoutes, {

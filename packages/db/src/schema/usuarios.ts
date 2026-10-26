@@ -7,7 +7,6 @@ export const usuarios = pgTable("usuarios", {
     .default(sql`uuidv7()`)
     .primaryKey(),
   email: varchar("email", { length: 255 }).notNull().unique(),
-  passwordHash: varchar("password_hash", { length: 255 }).notNull(),
   estudioId: uuid("estudio_id")
     .notNull()
     .references(() => estudios.id),

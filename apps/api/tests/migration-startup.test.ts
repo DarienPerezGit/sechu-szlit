@@ -33,7 +33,7 @@ afterEach(async () => {
 describe("Fastify startup", () => {
   it("does not run migrations", async () => {
     const url = await createIsolatedDatabase();
-    const app = await createServer(url, "test", "test-secret");
+    const app = await createServer(url, "test");
     await app.ready();
     const tables = await query(url, `SELECT count(*)::int AS count FROM information_schema.tables WHERE table_schema = current_schema()`);
     expect(tables.rows[0].count).toBe(0);
