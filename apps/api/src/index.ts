@@ -5,6 +5,9 @@ import { createDatabase } from "@sechub/db";
 import { buildApp } from "./app.js";
 import { createSupabaseClient } from "./utils/auth.js";
 
+export { buildApp, type AppDependencies } from "./app.js";
+export { createSupabaseClient } from "./utils/auth.js";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const envDir = join(__dirname, "..", "..", "..");
 const explicitDatabaseUrl = process.env.DATABASE_URL;
