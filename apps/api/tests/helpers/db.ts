@@ -9,7 +9,6 @@ import {
   type RoleCode,
   type Usuario,
   estudios,
-  sessions,
   usuarios,
   carpetas,
   bitacoraCarpetas,
@@ -83,7 +82,6 @@ export async function seedUser(
     .insert(usuarios)
     .values({
       email,
-      passwordHash: "(managed-by-supabase-auth)",
       estudioId: estudio.id,
       supabaseUserId,
       activo: overrides.activo ?? true,
@@ -115,7 +113,6 @@ export async function resetDatabase(db: Database): Promise<void> {
   await db.delete(bitacoraCarpetas);
   await db.delete(carpetas);
   await db.delete(empleadores);
-  await db.delete(sessions);
   await db.execute(sql`DELETE FROM usuarios_roles`);
   await db.execute(sql`DELETE FROM usuarios_sectores`);
   await db.delete(usuarios);

@@ -28,3 +28,4 @@ packages/db/src/**/*.d.ts.map
 skills-lock.json
 # One-off reports from local agent tooling, not part of the app
 reports/
+graphify-out/

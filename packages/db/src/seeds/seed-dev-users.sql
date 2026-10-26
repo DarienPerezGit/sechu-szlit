@@ -78,7 +78,6 @@ BEGIN
   -- ── 2. Create or update internal usuarios records ─────────────────────────
   INSERT INTO public.usuarios (
     email,
-    password_hash,
     estudio_id,
     supabase_user_id,
     activo
@@ -86,14 +85,12 @@ BEGIN
   VALUES
     (
       'admin@sechub.test',
-      '(managed-by-supabase-auth)',
       v_estudio_id,
       v_admin_auth_id,
       true
     ),
     (
       'viewer@sechub.test',
-      '(managed-by-supabase-auth)',
       v_estudio_id,
       v_viewer_auth_id,
       true
