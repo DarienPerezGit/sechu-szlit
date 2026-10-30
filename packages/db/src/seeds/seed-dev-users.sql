@@ -41,6 +41,10 @@ BEGIN
     email,
     encrypted_password,
     email_confirmed_at,
+    confirmation_token,
+    recovery_token,
+    email_change_token_new,
+    email_change,
     raw_app_meta_data,
     raw_user_meta_data,
     created_at,
@@ -55,6 +59,10 @@ BEGIN
       'admin@sechub.test',
       crypt('DevOnly-Admin-2024!', gen_salt('bf')),
       now(),
+      '',
+      '',
+      '',
+      '',
       '{"provider":"email","providers":["email"]}'::jsonb,
       '{}'::jsonb,
       now(),
@@ -68,8 +76,59 @@ BEGIN
       'viewer@sechub.test',
       crypt('DevOnly-Viewer-2024!', gen_salt('bf')),
       now(),
+      '',
+      '',
+      '',
+      '',
       '{"provider":"email","providers":["email"]}'::jsonb,
       '{}'::jsonb,
+      now(),
+      now()
+    )
+  ON CONFLICT (id) DO UPDATE
+    SET encrypted_password     = EXCLUDED.encrypted_password,
+        email_confirmed_at     = EXCLUDED.email_confirmed_at,
+        confirmation_token     = COALESCE(auth.users.confirmation_token, ''),
+        recovery_token         = COALESCE(auth.users.recovery_token, ''),
+        email_change_token_new = COALESCE(auth.users.email_change_token_new, ''),
+        email_change           = COALESCE(auth.users.email_change, ''),
+        updated_at             = now();
+
+  UPDATE auth.users
+  SET confirmation_token = COALESCE(confirmation_token, ''),
+      email_change = COALESCE(email_change, ''),
+      email_change_token_new = COALESCE(email_change_token_new, ''),
+      recovery_token = COALESCE(recovery_token, '')
+  WHERE email IN ('admin@sechub.test', 'viewer@sechub.test');
+
+  INSERT INTO auth.identities (
+    id,
+    provider_id,
+    user_id,
+    identity_data,
+    provider,
+    last_sign_in_at,
+    created_at,
+    updated_at
+  )
+  VALUES
+    (
+      v_admin_auth_id,
+      v_admin_auth_id::text,
+      v_admin_auth_id,
+      jsonb_build_object('sub', v_admin_auth_id::text, 'email', 'admin@sechub.test'),
+      'email',
+      now(),
+      now(),
+      now()
+    ),
+    (
+      v_viewer_auth_id,
+      v_viewer_auth_id::text,
+      v_viewer_auth_id,
+      jsonb_build_object('sub', v_viewer_auth_id::text, 'email', 'viewer@sechub.test'),
+      'email',
+      now(),
       now(),
       now()
     )
@@ -98,5 +157,20 @@ BEGIN
   ON CONFLICT (email) DO UPDATE
     SET supabase_user_id = EXCLUDED.supabase_user_id,
         activo           = EXCLUDED.activo;
+
+  -- ── 3. Assign roles to internal usuarios ──────────────────────────────────
+  INSERT INTO public.usuarios_roles (usuario_id, rol_id)
+  SELECT u.id, r.id
+  FROM public.usuarios u
+  CROSS JOIN public.roles r
+  WHERE u.email = 'admin@sechub.test' AND r.codigo = 'admin'
+  ON CONFLICT (usuario_id, rol_id) DO NOTHING;
+
+  INSERT INTO public.usuarios_roles (usuario_id, rol_id)
+  SELECT u.id, r.id
+  FROM public.usuarios u
+  CROSS JOIN public.roles r
+  WHERE u.email = 'viewer@sechub.test' AND r.codigo = 'lectura'
+  ON CONFLICT (usuario_id, rol_id) DO NOTHING;
 
 END $$;

@@ -11,23 +11,14 @@ export interface WebConfig {
   supabasePublishableKey: string;
 }
 
-type ViteEnv = Record<string, string | undefined>;
-
-function readViteEnv(name: string): string | undefined {
-  const importMeta = import.meta as { env?: ViteEnv };
-  return importMeta.env?.[name];
-}
-
 /**
  * Loads the web config from Vite env vars (VITE_SUPABASE_URL and
  * VITE_SUPABASE_PUBLISHABLE_KEY), failing fast with a clear message if any is
  * missing.
  */
 export function loadConfig(): WebConfig {
-  const supabaseUrl = readViteEnv("VITE_SUPABASE_URL");
-  const supabasePublishableKey = readViteEnv(
-    "VITE_SUPABASE_PUBLISHABLE_KEY",
-  );
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
   const missing: string[] = [];
   if (!supabaseUrl) missing.push("VITE_SUPABASE_URL");
