@@ -19,6 +19,23 @@ export async function catalogosRoutes(
 ) {
   const { db } = opts;
 
+  app.get("/catalogos", async (request, reply) => {
+    const [ec, ta, sec, tpActa, estActa] = await Promise.all([
+      db.select().from(estadosCaso).where(eq(estadosCaso.activo, true)).orderBy(estadosCaso.id),
+      db.select().from(tiposAudiencia).where(eq(tiposAudiencia.activo, true)).orderBy(tiposAudiencia.id),
+      db.select().from(sectores).where(eq(sectores.activo, true)).orderBy(sectores.ordenPipeline, sectores.id),
+      db.select().from(tiposActa).where(eq(tiposActa.activo, true)).orderBy(tiposActa.id),
+      db.select().from(estadosActa).where(eq(estadosActa.activo, true)).orderBy(estadosActa.id),
+    ]);
+    return reply.status(200).send({
+      estadosCaso: ec,
+      tiposAudiencia: ta,
+      sectores: sec,
+      tiposActa: tpActa,
+      estadosActa: estActa,
+    });
+  });
+
   app.get("/sectores", async (request, reply) => {
     const data = await db
       .select()

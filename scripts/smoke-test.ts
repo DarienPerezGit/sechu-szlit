@@ -1,4 +1,7 @@
-import { createClient } from "@supabase/supabase-js";
+import { config as loadDotenv } from "dotenv";
+
+loadDotenv({ path: ".env" });
+loadDotenv({ path: ".env.local", override: true });
 
 interface SmokeConfig {
   baseUrl: string;
@@ -68,18 +71,29 @@ async function runSmokeTests() {
 
   // 4. Authenticated flow (when Supabase credentials are provided)
   if (config.supabaseUrl && config.supabaseAnonKey) {
-    console.log(`[smoke-test] Authenticating against Supabase: ${config.supabaseUrl}`);
-    const supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
+    console.log(`[smoke-test] Authenticating against Supabase Auth: ${config.supabaseUrl}`);
 
     let token: string | null = null;
-    await check("Supabase sign-in with fictional presentation credentials", async () => {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: config.testEmail,
-        password: config.testPassword,
+    await check("Supabase sign-in with presentation credentials", async () => {
+      const res = await fetch(`${config.supabaseUrl}/auth/v1/token?grant_type=password`, {
+        method: "POST",
+        headers: {
+          "apikey": config.supabaseAnonKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: config.testEmail,
+          password: config.testPassword,
+        }),
       });
-      if (error) throw new Error(`Auth failed: ${error.message}`);
-      if (!data.session?.access_token) throw new Error("No access_token returned");
-      token = data.session.access_token;
+
+      if (!res.ok) {
+        throw new Error(`Auth failed (${res.status}): ${await res.text()}`);
+      }
+
+      const data = await res.json() as { access_token?: string };
+      if (!data.access_token) throw new Error("No access_token returned by Supabase Auth");
+      token = data.access_token;
     });
 
     if (token) {
@@ -88,8 +102,10 @@ async function runSmokeTests() {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) throw new Error(`Status ${res.status}: ${await res.text()}`);
-        const user = await res.json() as { email?: string; roles?: string[] };
-        if (user.email !== config.testEmail) throw new Error(`Expected email ${config.testEmail}, got ${user.email}`);
+        const body = await res.json() as { user?: { email?: string; roles?: string[] } };
+        if (body.user?.email !== config.testEmail) {
+          throw new Error(`Expected email ${config.testEmail}, got ${body.user?.email}`);
+        }
       });
 
       await check("Authenticated /api/catalogos returns active catalog data", async () => {
@@ -104,7 +120,7 @@ async function runSmokeTests() {
       });
     }
   } else {
-    console.log("[smoke-test] Skipping live Supabase sign-in (SUPABASE_URL or anon key not provided in env)");
+    console.log("[smoke-test] Skipping live Supabase sign-in (SUPABASE_URL or anon key not in env)");
   }
 
   console.log(`\n[smoke-test] Results: ${passed} passed, ${failed} failed`);
