@@ -1,6 +1,14 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { eq, and } from "drizzle-orm";
-import { type Database, carpetas, bitacoraCarpetas, empleadores } from "@sechub/db";
+import { eq, and, desc } from "drizzle-orm";
+import {
+  type Database,
+  audiencias,
+  carpetas,
+  bitacoraCarpetas,
+  empleadores,
+  tiposAudiencia,
+  usuarios,
+} from "@sechub/db";
 import { getAuthenticatedUser, UUID_REGEX, PG_UNIQUE_VIOLATION } from "../utils/auth.js";
 import {
   canWriteSector,
@@ -43,6 +51,28 @@ async function checkEmpleadorOwnership(
   }
 
   return true;
+}
+
+async function findCarpeta(
+  db: Database,
+  id: string,
+  estudioId: string,
+  reply: FastifyReply,
+): Promise<typeof carpetas.$inferSelect | null> {
+  if (!UUID_REGEX.test(id)) {
+    reply.status(400).send({ error: "ID inválido" });
+    return null;
+  }
+  const [carpeta] = await db
+    .select()
+    .from(carpetas)
+    .where(and(eq(carpetas.id, id), eq(carpetas.estudioId, estudioId)))
+    .limit(1);
+  if (!carpeta) {
+    reply.status(404).send({ error: "Carpeta no encontrada" });
+    return null;
+  }
+  return carpeta;
 }
 
 function handleDbError(err: any, reply: FastifyReply) {
@@ -92,6 +122,62 @@ export async function carpetasRoutes(
     }
 
     return reply.status(200).send(carpeta);
+  });
+
+  // GET /api/carpetas/:id/audiencias — audiencias vinculadas, cronológicas
+  app.get<{ Params: { id: string } }>("/carpetas/:id/audiencias", async (request, reply) => {
+    const user = await getAuthenticatedUser(request, reply, db);
+    if (!user) return;
+
+    const carpeta = await findCarpeta(db, request.params.id, user.estudioId, reply);
+    if (!carpeta) return;
+
+    const data = await db
+      .select({
+        id: audiencias.id,
+        carpetaId: audiencias.carpetaId,
+        abogadoId: audiencias.abogadoId,
+        fecha: audiencias.fecha,
+        hora: audiencias.hora,
+        estado: audiencias.estado,
+        tipoAudienciaId: audiencias.tipoAudienciaId,
+        linkReunion: audiencias.linkReunion,
+        notasInternas: audiencias.notasInternas,
+        abogadoEmail: usuarios.email,
+        tipoNombre: tiposAudiencia.nombre,
+        tipoColor: tiposAudiencia.color,
+      })
+      .from(audiencias)
+      .leftJoin(usuarios, eq(audiencias.abogadoId, usuarios.id))
+      .leftJoin(tiposAudiencia, eq(audiencias.tipoAudienciaId, tiposAudiencia.id))
+      .where(and(eq(audiencias.carpetaId, carpeta.id), eq(audiencias.estudioId, user.estudioId)))
+      .orderBy(audiencias.fecha, audiencias.hora);
+
+    return reply.status(200).send(data);
+  });
+
+  // GET /api/carpetas/:id/bitacora — historial, más reciente primero
+  app.get<{ Params: { id: string } }>("/carpetas/:id/bitacora", async (request, reply) => {
+    const user = await getAuthenticatedUser(request, reply, db);
+    if (!user) return;
+
+    const carpeta = await findCarpeta(db, request.params.id, user.estudioId, reply);
+    if (!carpeta) return;
+
+    const data = await db
+      .select({
+        id: bitacoraCarpetas.id,
+        accionRealizada: bitacoraCarpetas.accionRealizada,
+        fecha: bitacoraCarpetas.fecha,
+        metadata: bitacoraCarpetas.metadata,
+        usuarioEmail: usuarios.email,
+      })
+      .from(bitacoraCarpetas)
+      .leftJoin(usuarios, eq(bitacoraCarpetas.usuarioId, usuarios.id))
+      .where(eq(bitacoraCarpetas.carpetaId, carpeta.id))
+      .orderBy(desc(bitacoraCarpetas.fecha), desc(bitacoraCarpetas.id));
+
+    return reply.status(200).send(data);
   });
 
   // POST /api/carpetas
