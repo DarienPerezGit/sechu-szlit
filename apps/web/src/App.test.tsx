@@ -45,7 +45,7 @@ describe("App auth gate", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Sesión iniciada")).toBeTruthy();
+    expect(await screen.findByText("SECHUB · Estudio Szlit")).toBeTruthy();
     expect(screen.getByText("abogada@estudio.com")).toBeTruthy();
     expect(screen.getByText("ADMIN")).toBeTruthy();
     expect(screen.getByText("LECTURA")).toBeTruthy();
@@ -96,7 +96,7 @@ describe("App auth gate", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    expect(await screen.findByText("Sesión iniciada")).toBeTruthy();
+    expect(await screen.findByText("SECHUB · Estudio Szlit")).toBeTruthy();
 
     // At least one onAuthStateChange subscription is registered by App.
     expect(capturedAuthHandlers.length).toBeGreaterThan(0);
@@ -120,7 +120,7 @@ describe("App auth gate", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    expect(await screen.findByText("Sesión iniciada")).toBeTruthy();
+    expect(await screen.findByText("SECHUB · Estudio Szlit")).toBeTruthy();
 
     // The library has no dedicated refresh-failure event: when a background
     // token refresh fails it removes the dead session and emits SIGNED_OUT.
@@ -145,7 +145,7 @@ describe("App auth gate", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    expect(await screen.findByText("Sesión iniciada")).toBeTruthy();
+    expect(await screen.findByText("SECHUB · Estudio Szlit")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Cerrar sesión" }));
 
