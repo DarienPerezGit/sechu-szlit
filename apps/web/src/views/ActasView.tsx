@@ -9,7 +9,7 @@ import {
   type Audiencia,
   type Carpeta,
 } from "../lib/domain";
-import { fmtDate, fmtHora } from "../lib/format";
+import { fmtDate, fmtHora, toYmd } from "../lib/format";
 import { ErrorBox, Loading, Modal, errorMessage, useApp, useAsync } from "../components/ui";
 import { CarpetaDetalle } from "./CarpetasView";
 
@@ -62,8 +62,9 @@ export function ActasView() {
               <div className="card-main">
                 <p className="card-title">📋 {tipo?.nombre ?? "Acta"} · Expte. {acta.expediente ?? "sin número"}</p>
                 <p className="card-meta">
-                  {fmtDate(acta.fecha)}
-                  {acta.conciliadorNombre && <> · 👤 {acta.conciliadorNombre}</>}
+                  {[acta.fecha && `📅 ${fmtDate(acta.fecha)}`, acta.conciliadorNombre && `👤 ${acta.conciliadorNombre}`]
+                    .filter(Boolean)
+                    .join(" · ") || "Sin fecha ni conciliador"}
                   {acta.conciliadorEmail && <span className="muted"> ({acta.conciliadorEmail})</span>}
                 </p>
                 <p className="card-meta">
@@ -115,7 +116,7 @@ function NuevaActaModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
     estadoActaId: catalogos.estadosActa[0]?.id ?? 0,
     conciliadorNombre: "",
     conciliadorEmail: "",
-    fecha: "",
+    fecha: toYmd(new Date()),
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

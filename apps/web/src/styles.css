@@ -230,7 +230,7 @@ textarea { resize: vertical; }
 .error-box { background: var(--danger-bg); border: 1px solid #f0bcbc; border-radius: var(--radius); padding: 10px 14px; font-size: 13px; color: var(--danger); margin-bottom: 1rem; }
 .leyenda { margin-bottom: 12px; font-size: 12px; }
 .leyenda-item { margin-right: 10px; white-space: nowrap; }
-button.cal-day { text-align: left; display: block; width: 100%; color: var(--text); font: inherit; font-size: 12px; }
+button.cal-day { text-align: left; display: flex; flex-direction: column; justify-content: flex-start; align-items: stretch; width: 100%; color: var(--text); font: inherit; font-size: 12px; }
 .estado-badge { text-transform: capitalize; }
 .modal-overlay + .modal-overlay { background: rgba(0,0,0,0.3); }
 

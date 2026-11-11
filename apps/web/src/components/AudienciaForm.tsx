@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { crearAudiencia, type Carpeta } from "../lib/domain";
+import { toYmd } from "../lib/format";
 import { Modal, errorMessage, useApp } from "./ui";
 
 /**
@@ -20,7 +21,7 @@ export function AudienciaForm({
   onSaved: () => void;
 }) {
   const { catalogos, equipo, userId, toast } = useApp();
-  const [fecha, setFecha] = useState(fechaInicial ?? "");
+  const [fecha, setFecha] = useState(fechaInicial ?? toYmd(new Date()));
   const [hora, setHora] = useState("10:00");
   const [tipoId, setTipoId] = useState(catalogos.tiposAudiencia[0]?.id ?? 0);
   const [abogadoId, setAbogadoId] = useState(
