@@ -20,7 +20,7 @@ Procesal del pipeline laboral principal.
 
 ## Evidencia
 
-El prototipo original (`szlit-app (14).html`, seed del calendario del
+El prototipo original (`docs/design/prototipo-szlit.html`, seed del calendario del
 20/05/2026) registra una audiencia con `tipo:'accidente'` para
 **MORRESI, CARLOS ATILIO** cuyo `linkReunion` apunta a
 `https://go.srt.gob.ar/85FDF398A6` — no a Zoom ni a un dominio de SECLO,
