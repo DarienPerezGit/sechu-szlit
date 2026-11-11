@@ -250,3 +250,7 @@ button.cal-day { text-align: left; display: flex; flex-direction: column; justif
 .alert--warn { background: var(--warning-bg); color: var(--warning); border: 1px solid #f0d29a; }
 .alert--info { background: var(--info-bg); color: var(--info); border: 1px solid var(--info-border); }
 .status { margin: 0; color: var(--text-2); }
+
+/* Columnas del calendario: permiten achicarse en mobile en vez de desbordar. */
+.calendar-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.cal-day { min-width: 0; overflow: hidden; }
