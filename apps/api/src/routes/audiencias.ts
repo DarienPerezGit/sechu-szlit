@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, gte, isNull, lte } from "drizzle-orm";
 import {
   type Database,
   audiencias,
@@ -106,14 +106,26 @@ export async function audienciasRoutes(
   });
 
   // GET /api/audiencias?fecha=YYYY-MM-DD — agenda del día
-  app.get<{ Querystring: { fecha?: string } }>("/audiencias", async (request, reply) => {
+  // GET /api/audiencias?desde=YYYY-MM-DD&hasta=YYYY-MM-DD — rango (calendario, máx. 62 días)
+  app.get<{ Querystring: { fecha?: string; desde?: string; hasta?: string } }>("/audiencias", async (request, reply) => {
     const user = await getAuthenticatedUser(request, reply, db);
     if (!user) return;
 
-    const { fecha } = request.query;
+    const { fecha, desde, hasta } = request.query;
+    const isDate = (value: string | undefined): value is string =>
+      !!value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value));
 
-    if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
-      return reply.status(400).send({ error: "Parámetro 'fecha' requerido (YYYY-MM-DD)" });
+    let fechaFilter;
+    if (isDate(fecha)) {
+      fechaFilter = eq(audiencias.fecha, fecha);
+    } else if (isDate(desde) && isDate(hasta)) {
+      const days = (Date.parse(hasta) - Date.parse(desde)) / 86_400_000;
+      if (days < 0 || days > 62) {
+        return reply.status(400).send({ error: "Rango inválido: 'hasta' debe ser posterior a 'desde' y abarcar como máximo 62 días" });
+      }
+      fechaFilter = and(gte(audiencias.fecha, desde), lte(audiencias.fecha, hasta));
+    } else {
+      return reply.status(400).send({ error: "Parámetro 'fecha' o 'desde'+'hasta' requerido (YYYY-MM-DD)" });
     }
 
     const data = await db
@@ -128,9 +140,11 @@ export async function audienciasRoutes(
         linkReunion: audiencias.linkReunion,
         linkDetalle: audiencias.linkDetalle,
         notasInternas: audiencias.notasInternas,
+        estado: audiencias.estado,
         createdAt: audiencias.createdAt,
         updatedAt: audiencias.updatedAt,
         caratula: carpetas.caratula,
+        expediente: carpetas.expediente,
         abogadoEmail: usuarios.email,
         tipoNombre: tiposAudiencia.nombre,
         tipoColor: tiposAudiencia.color,
@@ -148,10 +162,10 @@ export async function audienciasRoutes(
       .where(
         and(
           eq(audiencias.estudioId, user.estudioId),
-          eq(audiencias.fecha, fecha),
+          fechaFilter,
         ),
       )
-      .orderBy(audiencias.hora);
+      .orderBy(audiencias.fecha, audiencias.hora);
 
     return reply.status(200).send(data);
   });

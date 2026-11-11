@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Login } from "./components/Login";
+import { Shell } from "./components/Shell";
 import { ApiError, apiFetch, isDeactivatedError } from "./lib/api";
 import { getSupabaseClient } from "./lib/supabase";
 
@@ -155,29 +156,5 @@ export function App() {
     );
   }
 
-  const { user } = status;
-  return (
-    <main className="container">
-      <div className="card">
-        <h1 className="card__title">Sesión iniciada</h1>
-        <p className="card__subtitle">SECHUB — Sistema de gestión</p>
-        <p className="status-line">
-          <strong>Correo:</strong> {user.email}
-        </p>
-        <p className="status-line">
-          <strong>Roles:</strong>{" "}
-          {user.roles.length > 0
-            ? user.roles.map((role) => (
-                <span key={role} className="badge">
-                  {role}
-                </span>
-              ))
-            : "Sin roles asignados"}
-        </p>
-        <button className="button" type="button" onClick={handleLogout}>
-          Cerrar sesión
-        </button>
-      </div>
-    </main>
-  );
+  return <Shell user={status.user} onLogout={handleLogout} />;
 }

@@ -9,6 +9,7 @@ import { authRoutes } from "./routes/auth.js";
 import { catalogosRoutes } from "./routes/catalogos.js";
 import { carpetasRoutes } from "./routes/carpetas.js";
 import { audienciasRoutes } from "./routes/audiencias.js";
+import { equipoRoutes } from "./routes/equipo.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -70,6 +71,11 @@ export async function buildApp(deps: AppDependencies) {
   });
 
   app.register(actasRoutes, {
+    prefix: "/api",
+    db: deps.db,
+  });
+
+  app.register(equipoRoutes, {
     prefix: "/api",
     db: deps.db,
   });
