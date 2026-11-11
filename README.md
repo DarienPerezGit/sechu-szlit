@@ -2,7 +2,7 @@
 
 Sistema de gestión para estudios jurídicos laborales: unifica agenda de audiencias, legajos de casos, liquidaciones laborales y actas SECLO en una sola plataforma.
 
-![build](https://img.shields.io/badge/build-passing-3B6D11) ![coverage](https://img.shields.io/badge/coverage-0%25-A32D2D) ![version](https://img.shields.io/badge/version-0.1.0-185FA5) ![license](https://img.shields.io/badge/license-privado-6b6b66)
+![version](https://img.shields.io/badge/version-0.1.0-185FA5) ![license](https://img.shields.io/badge/license-privado-6b6b66)
 
 ## Quick start
 
@@ -43,7 +43,7 @@ Frontend estático ┼─▶ API REST ─▶ Drizzle ORM     │ ──▶ Postg
 ```
 
 - **Monolito**: Un solo deploy y dominio (`app.estudioszlit.com.ar`), sin CORS. Fastify sirve la API en `/api/*` y el frontend estático compilado vía `@fastify/static`.
-- **Sesión**: Cookies de sesión más seguras (`httpOnly` + `SameSite=Strict`). Autenticación local mediante email y contraseña propia.
+- **Sesión**: Supabase Auth. El frontend inicia sesión con Supabase y llama a la API con `Authorization: Bearer <access_token>`; Fastify valida el token y resuelve el perfil interno (`usuarios.supabase_user_id`), sus roles y sectores. No hay contraseñas ni sesiones propias.
 - **Workers**: Ejecución en segundo plano vía **graphile-worker** directamente sobre Postgres (sin Redis). Tareas de polling de Gmail/Calendar cada 30 minutos.
 - **ORM**: Drizzle ORM con migraciones SQL explícitas y control directo de transacciones. La ejecución se realiza exclusivamente con `pnpm db:migrate`; Fastify no migra al iniciar.
 - **DB (Aislamiento)**: PostgreSQL. Diseño "tenant-ready" con columna `estudio_id` (not null + FK) e índices compuestos empezando por `estudio_id` en todas las tablas núcleo. Tipado en TypeScript que exige `estudio_id` a nivel de compilación en toda query. Row-Level Security (RLS) diferido: políticas pre-nombradas (`{tabla}_estudio_isolation`) pero desactivadas en producción inicial al ser hoy monotenant.
@@ -67,12 +67,20 @@ Variables de entorno (`.env.example` como plantilla; `.env` y `.env.local` está
 DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
 # Admin y migraciones: preferir el endpoint directo
 MIGRATION_DATABASE_URL=postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres
-COOKIE_SECRET=change-me-in-production-minimum-32-characters-long
+# Supabase Auth (la API valida los Bearer tokens)
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_PUBLISHABLE_KEY=<publishable-key>
+# Tests: Postgres local de loopback (crea bases descartables)
+TEST_DATABASE_URL=postgresql://postgres:<password>@localhost:5432/postgres
 NODE_ENV=development
 PORT=3000
 ```
 
-> **Aviso de datos:** la base de dev/scratch (Neon o Docker local) no debe contener datos reales del Estudio Szlit — solo expedientes y usuarios de prueba.
+El frontend lee `VITE_SUPABASE_URL` y `VITE_SUPABASE_PUBLISHABLE_KEY` desde `apps/web/.env.local` (plantilla en `apps/web/.env.example`).
+
+Para cargar datos de demo realistas a través de la API: `pnpm seed:demo` (ver `docs/demo-guion.md`).
+
+> **Aviso de datos:** la base de dev/scratch (Supabase o Docker local) no debe contener datos reales del Estudio Szlit — solo expedientes y usuarios de prueba.
 
 ## Estructura de carpetas
 
@@ -83,9 +91,13 @@ sechub/
 │   └── web/          # Frontend estático
 ├── packages/
 │   └── db/           # Drizzle ORM, schema, migraciones SQL
+├── api/              # Entrada serverless de Vercel (/api/* → Fastify)
 ├── docs/
 │   ├── adr/          # Architecture Decision Records (ADRs)
-│   └── agents/       # Issue tracker, triage, domain docs config
+│   ├── agents/       # Issue tracker, triage, domain docs config
+│   ├── design/       # Prototipo visual original (HTML)
+│   └── archive/      # PRDs y handoffs de tickets ya cerrados
+├── scripts/          # smoke test, seed de demo, utilidades
 └── .env.example
 ```
 
@@ -105,11 +117,13 @@ In an emergency, `usuarios.role` can be reconstructed from `usuarios_roles` join
 pnpm test              # unit + integration
 ```
 
-> Nota: `pnpm test` requiere `TEST_DATABASE_URL` apuntando a PostgreSQL local de loopback y crea bases descartables para el ciclo destructivo; no uses una base remota de Neon ni compartida. No se simulan múltiples tenants aún (eso viene con los tickets de permisos).
+> Nota: `pnpm test` requiere `TEST_DATABASE_URL` apuntando a PostgreSQL local de loopback y crea bases descartables para el ciclo destructivo; no uses una base remota ni compartida. No se simulan múltiples tenants aún (eso viene con los tickets de permisos).
 
 ## Deploy / CI-CD
 
-Despliegue en Railway (Postgres gestionado + servicio web monolito con worker en el mismo proceso o worker liviano dedicado, desactivado el sleep por inactividad). Respaldos automáticos de la plataforma complementados con un job de respaldo diario (`pg_dump`) hacia un bucket externo S3/Backblaze B2. Entornos aislados basados en branches (staging y producción) desde el primer día.
+Despliegue en **Vercel Hobby** con un solo origen: el frontend estático se sirve desde la CDN y `/api/*` va a una función serverless que levanta Fastify (`api/index.ts`). La base es **Supabase PostgreSQL** a través del pooler. Configuración, variables y plan de contingencia local en [`docs/deployment-vercel.md`](docs/deployment-vercel.md); backups y recuperación ante pausas del plan Free en [`docs/supabase-backup-restore.md`](docs/supabase-backup-restore.md).
+
+Las migraciones nunca corren en el deploy: se aplican con `pnpm db:migrate` usando `MIGRATION_DATABASE_URL`. Verificación post-deploy: `TARGET_URL=https://<deploy> pnpm smoke`.
 
 Residencia de datos (Ley 25.326) gobernada por consentimiento y cláusulas de transferencia internacional en el formulario de contratación (etapa Comunicaciones), no por región de nube.
 

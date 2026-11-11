@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 
 // After each test, re-activate every catalog row. Tests below flip `activo`
 // to false to assert the endpoint filter; if a run is interrupted mid-test,
-// the persistent Neon DB would otherwise keep those rows deactivated and
+// a persistent test DB would otherwise keep those rows deactivated and
 // break subsequent runs. This afterEach makes the suite self-healing.
 async function reactivateAll(db: Database) {
   await Promise.all([

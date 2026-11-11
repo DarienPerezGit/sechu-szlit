@@ -62,7 +62,7 @@
 | `apps/api/tests/audiencias.test.ts` | API tests |
 | `apps/api/src/app.ts` | Route registration |
 | `apps/api/tests/helpers/db.ts` | Test helpers (updated reset) |
-| `docs/prd/ticket-4-audiencias-orphan-tray.md` | PRD (reference) |
+| `docs/archive/prd/ticket-4-audiencias-orphan-tray.md` | PRD (reference) |
 
 ---
 
@@ -75,7 +75,7 @@
    Crear PR contra `main` (closes #5).
 
 2. **Ticket 5: Permisos por rol y sector (Issue #6)**:
-   - PRD en `docs/prd/ticket-5-permisos-rol-sector.md`.
+   - PRD en `docs/archive/prd/ticket-5-permisos-rol-sector.md`.
    - Requiere nuevo schema de permisos, migración, y endpoints de RBAC.
 
 ---
