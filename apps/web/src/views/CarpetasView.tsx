@@ -327,8 +327,12 @@ export function CarpetaDetalle({ id, onClose }: { id: string; onClose: () => voi
               <br />
               <span className="small">
                 Expte. {c.expediente} · Demandada: {c.demandada} · versión {c.version}
-                <br />
-                Abogado responsable: {responsable?.email ?? "—"}
+                {editable && (
+                  <>
+                    <br />
+                    Abogado responsable: {responsable?.email ?? "—"}
+                  </>
+                )}
               </span>
             </div>
 
@@ -342,7 +346,9 @@ export function CarpetaDetalle({ id, onClose }: { id: string; onClose: () => voi
                 <span className="small muted">a cargo de</span> <AbogadoTag email={responsable?.email} />
                 <br />
                 <span className="small muted">
-                  El estado y el sector los cambia {alias(responsable?.email)} o el titular del estudio.
+                  {responsable?.esTitular
+                    ? `El estado y el sector los cambia ${alias(responsable.email)}, titular del estudio.`
+                    : `El estado y el sector los cambia ${alias(responsable?.email)} o el titular del estudio.`}
                 </span>
               </p>
             ) : (

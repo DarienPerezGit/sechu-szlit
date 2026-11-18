@@ -158,6 +158,20 @@ describe("agenda compartida y administración del equipo", async () => {
     expect((await send(titular, "POST", "/api/equipo", alta)).statusCode).toBe(409);
   });
 
+  it("un abogado con carpetas a su cargo no pasa a asistente hasta que se las reasignen", async () => {
+    const { titular, responsable, reemplazo, send, carpeta } = await escenario();
+
+    const bloqueado = await send(titular, "PATCH", `/api/equipo/${responsable.id}`, { rol: "asistente" });
+    expect(bloqueado.statusCode).toBe(409);
+
+    const reasignada = await send(titular, "PATCH", `/api/carpetas/${carpeta.id}`, {
+      version: carpeta.version,
+      abogadoResponsableId: reemplazo.id,
+    });
+    expect(reasignada.statusCode).toBe(200);
+    expect((await send(titular, "PATCH", `/api/equipo/${responsable.id}`, { rol: "asistente" })).statusCode).toBe(200);
+  });
+
   it("el alta informa cuando el proveedor rechaza la cuenta o no está configurado", async () => {
     const rechaza = await escenario(fakeAuthAdmin(new AuthAdminError(409, "Ya existe una cuenta con ese email")));
     const alta = { email: `otra-${Date.now()}@test.com`, password: "Inicial-2026", rol: "asistente" };

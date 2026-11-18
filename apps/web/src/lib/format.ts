@@ -74,5 +74,8 @@ export function describirAccion(accion: string, metadata: Record<string, unknown
     const nuevo = typeof metadata?.estado_nuevo === "string" ? metadata.estado_nuevo : null;
     return nuevo ? `Acta vinculada · estado → ${nuevo.replace("_", " ")}` : "Acta vinculada";
   }
+  if (accion === "audiencia_reasignada") return "Audiencia reasignada a otro abogado";
+  if (accion === "audiencia_actualizada") return "Audiencia reprogramada o anotada";
+  if (accion === "audiencia_vinculada") return "Audiencia vinculada a la carpeta";
   return accion;
 }

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import type { Carpeta, Catalogos, MiembroEquipo, Perfil } from "../lib/domain";
+import type { Audiencia, Carpeta, Catalogos, MiembroEquipo, Perfil } from "../lib/domain";
 import { ApiError } from "../lib/api";
 import { colorFor, alias } from "../lib/format";
 
@@ -24,6 +24,20 @@ export const puedeEditarCarpeta = (
   ctx: Pick<AppContextValue, "perfil" | "userId">,
   carpeta: Pick<Carpeta, "abogadoResponsableId">,
 ) => ctx.perfil === "titular" || (ctx.perfil === "abogado" && carpeta.abogadoResponsableId === ctx.userId);
+
+/** El abogado común abre solo sus carpetas; puede asistir a audiencias de un colega sin poder abrirlas. */
+export const puedeVerCarpeta = (
+  ctx: Pick<AppContextValue, "perfil" | "userId">,
+  carpeta: { abogadoResponsableId: string | null | undefined },
+) => ctx.perfil !== "abogado" || carpeta.abogadoResponsableId === ctx.userId;
+
+/** Delegar (cubrir a un colega) pasa por el titular o por procuración. */
+export const puedeReasignarAudiencia = (ctx: Pick<AppContextValue, "perfil">) =>
+  ctx.perfil === "titular" || ctx.perfil === "asistente";
+
+/** Cada uno edita exactamente lo que ve en su agenda. */
+export const puedeEditarAudiencia = (ctx: Pick<AppContextValue, "perfil" | "userId">, a: Audiencia) =>
+  ctx.perfil !== "abogado" || a.abogadoId === ctx.userId || a.carpetaAbogadoResponsableId === ctx.userId;
 
 /** El abogado común agenda solo para sí; el titular y el asistente, para cualquiera. */
 export const agendaPara = (ctx: Pick<AppContextValue, "perfil" | "userId" | "equipo">) =>

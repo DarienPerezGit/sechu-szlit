@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { and, eq, ne } from "drizzle-orm";
 import {
+  carpetas,
   type Database,
   ROLE_CODES,
   roles,
@@ -166,6 +167,19 @@ export async function equipoRoutes(app: FastifyInstance, opts: EquipoPluginOptio
 
     if (esTitular && rol !== ROLE_CODES.ABOGADO) {
       return reply.status(400).send({ error: "Solo un abogado puede ser titular" });
+    }
+
+    // Una carpeta siempre la lleva un abogado: antes de que deje de serlo,
+    // el titular le reasigna sus carpetas.
+    if (miembro.rol === ROLE_CODES.ABOGADO && rol !== ROLE_CODES.ABOGADO) {
+      const [aCargo] = await db
+        .select({ id: carpetas.id })
+        .from(carpetas)
+        .where(and(eq(carpetas.estudioId, user.estudioId), eq(carpetas.abogadoResponsableId, id)))
+        .limit(1);
+      if (aCargo) {
+        return reply.status(409).send({ error: "Tiene carpetas a su cargo: reasignalas a otro abogado antes de cambiarle el perfil" });
+      }
     }
 
     const quedaSinTitular = await db.transaction(async (tx) => {
