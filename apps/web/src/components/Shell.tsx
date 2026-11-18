@@ -4,7 +4,7 @@ import { fetchCatalogos, fetchEquipo } from "../lib/domain";
 import { ActasView } from "../views/ActasView";
 import { CalendarioView } from "../views/CalendarioView";
 import { CarpetasView } from "../views/CarpetasView";
-import { AppContext, ErrorBox, Loading, useAsync, useToast } from "./ui";
+import { AppContext, ErrorBox, Loading, PERFIL_LABEL, useAsync, useToast } from "./ui";
 
 const TABS = [
   { id: "carpetas", label: "📁 Carpetas" },
@@ -19,8 +19,11 @@ export function Shell({ user, onLogout }: { user: MeUser; onLogout: () => void }
   const base = useAsync(() => Promise.all([fetchCatalogos(), fetchEquipo()]), []);
 
   const ctx = useMemo(
-    () => (base.data ? { catalogos: base.data[0], equipo: base.data[1], userId: user.id, toast } : null),
-    [base.data, user.id, toast],
+    () =>
+      base.data
+        ? { catalogos: base.data[0], equipo: base.data[1], userId: user.id, perfil: user.perfil, toast }
+        : null,
+    [base.data, user.id, user.perfil, toast],
   );
 
   return (
@@ -34,11 +37,11 @@ export function Shell({ user, onLogout }: { user: MeUser; onLogout: () => void }
             <h1>SECHUB · Estudio Szlit</h1>
             <p>
               {user.email}{" "}
-              {user.roles.map((role) => (
-                <span key={role} className="badge info">
-                  {role}
-                </span>
-              ))}
+              {user.perfil ? (
+                <span className="badge info">{PERFIL_LABEL[user.perfil]}</span>
+              ) : (
+                <span className="badge">Sin rol asignado</span>
+              )}
             </p>
           </div>
         </div>

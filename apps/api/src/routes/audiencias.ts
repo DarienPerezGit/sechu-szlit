@@ -8,11 +8,14 @@ import {
   tiposAudiencia,
   bitacoraCarpetas,
 } from "@sechub/db";
-import { getAuthenticatedUser, UUID_REGEX } from "../utils/auth.js";
+import { UUID_REGEX } from "../utils/auth.js";
 import {
-  canWriteSector,
-  getWriteAuthorization,
-  requireWriteAuthorization,
+  audienciasSinCarpetaVisibles,
+  audienciasVisibles,
+  getAccess,
+  puedeAgendarPara,
+  puedeTrabajarEnCarpeta,
+  requireAccess,
   sendForbidden,
 } from "../authorization.js";
 
@@ -87,9 +90,8 @@ export async function audienciasRoutes(
   const { db } = opts;
 
   // GET /api/audiencias/orphan — must be registered BEFORE :id routes
-  app.get("/audiencias/orphan", async (request, reply) => {
-    const user = await getAuthenticatedUser(request, reply, db);
-    if (!user) return;
+  app.get("/audiencias/orphan", { preValidation: requireAccess(db) }, async (request, reply) => {
+    const { user, authorization } = getAccess(request);
 
     const data = await db
       .select()
@@ -98,6 +100,7 @@ export async function audienciasRoutes(
         and(
           eq(audiencias.estudioId, user.estudioId),
           isNull(audiencias.carpetaId),
+          audienciasSinCarpetaVisibles(authorization),
         ),
       )
       .orderBy(audiencias.fecha, audiencias.hora);
@@ -107,9 +110,8 @@ export async function audienciasRoutes(
 
   // GET /api/audiencias?fecha=YYYY-MM-DD — agenda del día
   // GET /api/audiencias?desde=YYYY-MM-DD&hasta=YYYY-MM-DD — rango (calendario, máx. 62 días)
-  app.get<{ Querystring: { fecha?: string; desde?: string; hasta?: string } }>("/audiencias", async (request, reply) => {
-    const user = await getAuthenticatedUser(request, reply, db);
-    if (!user) return;
+  app.get<{ Querystring: { fecha?: string; desde?: string; hasta?: string } }>("/audiencias", { preValidation: requireAccess(db) }, async (request, reply) => {
+    const { user, authorization } = getAccess(request);
 
     const { fecha, desde, hasta } = request.query;
     const isDate = (value: string | undefined): value is string =>
@@ -163,6 +165,7 @@ export async function audienciasRoutes(
         and(
           eq(audiencias.estudioId, user.estudioId),
           fechaFilter,
+          audienciasVisibles(authorization),
         ),
       )
       .orderBy(audiencias.fecha, audiencias.hora);
@@ -183,7 +186,7 @@ export async function audienciasRoutes(
       notasInternas?: string | null;
     };
   }>("/audiencias", {
-    preValidation: requireWriteAuthorization(db),
+    preValidation: requireAccess(db),
     schema: {
       body: {
         type: "object",
@@ -201,7 +204,7 @@ export async function audienciasRoutes(
       },
     },
   }, async (request, reply) => {
-    const { user, authorization } = getWriteAuthorization(request);
+    const { user, authorization } = getAccess(request);
 
     const {
       carpetaId,
@@ -227,6 +230,9 @@ export async function audienciasRoutes(
     // Validate abogado ownership
     const abogadoOk = await checkAbogadoOwnership(db, abogadoId, user.estudioId, reply);
     if (!abogadoOk) return;
+    if (!puedeAgendarPara(authorization, abogadoId)) {
+      return sendForbidden(reply);
+    }
 
     // Validate tipoAudienciaId exists
     const [tipo] = await db
@@ -239,12 +245,12 @@ export async function audienciasRoutes(
       return reply.status(400).send({ error: "El tipo de audiencia especificado no existe" });
     }
 
-    // Validate carpeta ownership and responsible-sector access if provided.
+    // Si nace vinculada, quien agenda debe poder trabajar en esa carpeta.
     if (carpetaId) {
       const carpeta = await checkCarpetaOwnership(db, carpetaId, user.estudioId, reply);
       if (!carpeta) return;
 
-      if (!canWriteSector(authorization, carpeta.sectorActualId)) {
+      if (!puedeTrabajarEnCarpeta(authorization, carpeta)) {
         return sendForbidden(reply);
       }
     }
@@ -272,7 +278,7 @@ export async function audienciasRoutes(
     Params: { id: string };
     Body: { carpetaId: string };
   }>("/audiencias/:id/vincular", {
-    preValidation: requireWriteAuthorization(db),
+    preValidation: requireAccess(db),
     schema: {
       body: {
         type: "object",
@@ -283,7 +289,7 @@ export async function audienciasRoutes(
       },
     },
   }, async (request, reply) => {
-    const { user, authorization } = getWriteAuthorization(request);
+    const { user, authorization } = getAccess(request);
 
     const { id } = request.params;
     const { carpetaId } = request.body;
@@ -308,7 +314,7 @@ export async function audienciasRoutes(
       return reply.status(404).send({ error: "Audiencia no encontrada" });
     }
 
-    // Linked audiencias remain writable only by their carpeta's current sector.
+    // Una audiencia ya vinculada solo la toca quien puede trabajar en su carpeta.
     if (audiencia.carpetaId !== null) {
       const [linkedCarpeta] = await db
         .select()
@@ -320,16 +326,24 @@ export async function audienciasRoutes(
           ),
         )
         .limit(1);
-      if (!linkedCarpeta || !canWriteSector(authorization, linkedCarpeta.sectorActualId)) {
+      if (!linkedCarpeta || !puedeTrabajarEnCarpeta(authorization, linkedCarpeta)) {
         return sendForbidden(reply);
       }
 
       return reply.status(400).send({ error: "La audiencia ya está vinculada a una carpeta" });
     }
 
+    // El abogado común solo vincula las audiencias sin carpeta que tiene asignadas.
+    if (!puedeAgendarPara(authorization, audiencia.abogadoId)) {
+      return sendForbidden(reply);
+    }
+
     // Validate target carpeta ownership
     const carpeta = await checkCarpetaOwnership(db, carpetaId, user.estudioId, reply);
     if (!carpeta) return;
+    if (!puedeTrabajarEnCarpeta(authorization, carpeta)) {
+      return sendForbidden(reply);
+    }
 
     // Link in a transaction with bitacora
     try {

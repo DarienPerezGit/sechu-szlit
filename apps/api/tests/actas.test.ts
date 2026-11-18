@@ -12,7 +12,6 @@ import {
   sectores,
   tiposActa,
   usuarios,
-  usuariosSectores,
 } from "@sechub/db";
 import { buildApp } from "../src/app.js";
 import { createTestDatabase, createTestSupabaseClient, getDatabaseUrl, resetDatabase, seedUser } from "./helpers/db.js";
@@ -395,12 +394,12 @@ describe("actas API", async () => {
     ]);
   });
 
-  it("blocks lectura from creating or linking actas while preserving reads", async () => {
+  it("blocks a user without a role from creating, linking or reading actas", async () => {
     const app = await createApp();
     const adminCredentials = await seedUser(db, { email: `acta-permission-admin-${Date.now()}@test.com` });
     const lecturaCredentials = await seedUser(db, {
-      email: `acta-permission-lectura-${Date.now()}@test.com`,
-      role: "lectura",
+      email: `acta-permission-sin-rol-${Date.now()}@test.com`,
+      role: null,
     });
     const adminCookie = await loginUser(app, adminCredentials);
     const lecturaCookie = await loginUser(app, lecturaCredentials);
@@ -462,7 +461,7 @@ describe("actas API", async () => {
 
     expect(createResponse.statusCode).toBe(403);
     expect(linkResponse.statusCode).toBe(403);
-    expect(orphanResponse.statusCode).toBe(200);
+    expect(orphanResponse.statusCode).toBe(403);
   });
 
   it("keeps actas isolated between tenants", async () => {
@@ -630,34 +629,35 @@ describe("actas API", async () => {
     expect(entries.filter((entry) => entry.accionRealizada === "acta_vinculada")).toHaveLength(0);
   });
 
-  it("allows responsable_sector only for assigned target sectors", async () => {
+  it("lets a non-titular abogado link actas only on carpetas they are responsible for", async () => {
     const app = await createApp();
-    const adminCredentials = await seedUser(db, { email: `acta-sector-admin-${Date.now()}@test.com` });
+    const adminCredentials = await seedUser(db, { email: `acta-owner-titular-${Date.now()}@test.com` });
     const managerCredentials = await seedUser(db, {
-      email: `acta-sector-manager-${Date.now()}@test.com`,
-      role: "responsable_sector",
+      email: `acta-owner-abogado-${Date.now()}@test.com`,
+      role: "abogado",
+      esTitular: false,
     });
     const adminCookie = await loginUser(app, adminCredentials);
     const managerCookie = await loginUser(app, managerCredentials);
     const [admin] = await db.select().from(usuarios).where(eq(usuarios.email, adminCredentials.email));
     const [manager] = await db.select().from(usuarios).where(eq(usuarios.email, managerCredentials.email));
-    const [assignedSector, otherSector] = await db.select().from(sectores).limit(2);
-    await db.insert(usuariosSectores).values({ usuarioId: manager.id, sectorId: assignedSector.id });
+    const [sector] = await db.select().from(sectores).limit(1);
     const [tipoActa] = await db.select().from(tiposActa).where(eq(tiposActa.codigo, "acuerdo"));
     const [estadoActa] = await db.select().from(estadosActa).where(eq(estadosActa.codigo, "pendiente"));
     const [estadoCaso] = await db.select().from(estadosCaso).where(eq(estadosCaso.codigo, "en_tramite"));
 
-    async function createTarget(sectorId: number, label: string) {
+    async function createTarget(abogadoResponsableId: string, label: string) {
       const carpetaResponse = await app.inject({
         method: "POST",
         url: "/api/carpetas",
         headers: { authorization: adminCookie },
         payload: {
-          sectorActualId: sectorId,
+          sectorActualId: sector.id,
           estadoCasoId: estadoCaso.id,
-          expediente: `ACTA-SECTOR-${label}-${Date.now()}`,
-          caratula: "Permisos sectoriales",
+          expediente: `ACTA-OWNER-${label}-${Date.now()}`,
+          caratula: "Permisos por abogado responsable",
           demandada: "Demandada",
+          abogadoResponsableId,
         },
       });
       const carpeta = carpetaResponse.json();
@@ -682,7 +682,7 @@ describe("actas API", async () => {
       return { carpeta, audiencia: audienciaResponse.json(), acta: actaResponse.json() };
     }
 
-    const assigned = await createTarget(assignedSector.id, "assigned");
+    const assigned = await createTarget(manager.id, "assigned");
     const allowedResponse = await app.inject({
       method: "PATCH",
       url: `/api/actas/${assigned.acta.id}/vincular`,
@@ -691,7 +691,7 @@ describe("actas API", async () => {
     });
     expect(allowedResponse.statusCode).toBe(200);
 
-    const denied = await createTarget(otherSector.id, "denied");
+    const denied = await createTarget(admin.id, "denied");
     const deniedResponse = await app.inject({
       method: "PATCH",
       url: `/api/actas/${denied.acta.id}/vincular`,
@@ -707,19 +707,19 @@ describe("actas API", async () => {
     expect(unchangedDeniedAudiencia.estado).toBe("pendiente");
   });
 
-  it("authorizes against the sector transferred before the carpeta lock", async () => {
+  it("authorizes against the abogado reassigned before the carpeta lock", async () => {
     const app = await createApp();
     const adminCredentials = await seedUser(db, { email: `acta-transfer-admin-${Date.now()}@test.com` });
     const managerCredentials = await seedUser(db, {
       email: `acta-transfer-manager-${Date.now()}@test.com`,
-      role: "responsable_sector",
+      role: "abogado",
+      esTitular: false,
     });
     const adminCookie = await loginUser(app, adminCredentials);
     const managerCookie = await loginUser(app, managerCredentials);
     const [admin] = await db.select().from(usuarios).where(eq(usuarios.email, adminCredentials.email));
     const [manager] = await db.select().from(usuarios).where(eq(usuarios.email, managerCredentials.email));
-    const [oldSector, newSector] = await db.select().from(sectores).limit(2);
-    await db.insert(usuariosSectores).values({ usuarioId: manager.id, sectorId: oldSector.id });
+    const [sector] = await db.select().from(sectores).limit(1);
     const [tipoActa] = await db.select().from(tiposActa).where(eq(tiposActa.codigo, "acuerdo"));
     const [estadoActa] = await db.select().from(estadosActa).where(eq(estadosActa.codigo, "pendiente"));
     const [estadoCaso] = await db.select().from(estadosCaso).where(eq(estadosCaso.codigo, "en_tramite"));
@@ -729,11 +729,12 @@ describe("actas API", async () => {
       url: "/api/carpetas",
       headers: { authorization: adminCookie },
       payload: {
-        sectorActualId: oldSector.id,
+        sectorActualId: sector.id,
         estadoCasoId: estadoCaso.id,
         expediente: `ACTA-TRANSFER-${Date.now()}`,
-        caratula: "Transferencia concurrente",
+        caratula: "Reasignación concurrente",
         demandada: "Demandada",
+        abogadoResponsableId: manager.id,
       },
     });
     const carpeta = carpetaResponse.json();
@@ -786,8 +787,8 @@ describe("actas API", async () => {
         }
       }
       await transferClient.query(
-        "UPDATE carpetas SET sector_actual_id = $1 WHERE id = $2",
-        [newSector.id, carpeta.id],
+        "UPDATE carpetas SET abogado_responsable_id = $1 WHERE id = $2",
+        [admin.id, carpeta.id],
       );
       await transferClient.query("COMMIT");
       const linkResponse = await linkPromise;
@@ -797,7 +798,7 @@ describe("actas API", async () => {
       const [transferredCarpeta] = await db.select().from(carpetas).where(eq(carpetas.id, carpeta.id));
       const [unchangedAudiencia] = await db.select().from(audiencias).where(eq(audiencias.id, audienciaResponse.json().id));
       expect(unchangedActa.carpetaId).toBeNull();
-      expect(transferredCarpeta.sectorActualId).toBe(newSector.id);
+      expect(transferredCarpeta.abogadoResponsableId).toBe(admin.id);
       expect(transferredCarpeta.version).toBe(carpeta.version);
       expect(unchangedAudiencia.estado).toBe("pendiente");
     } finally {

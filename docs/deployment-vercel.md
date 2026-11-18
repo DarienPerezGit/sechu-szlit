@@ -66,18 +66,18 @@ Estas variables se conservan **únicamente en CI/CD (GitHub Secrets) o entornos 
 
 ## 4. Datos de Prueba para la Presentación (Fictional Seeds)
 
-Para la demostración académica y smoke tests en vivo, se cuenta con dos usuarios ficticios precargados en Supabase Auth y sincronizados con `public.usuarios`:
+Para la demostración académica y smoke tests en vivo, el equipo ficticio del estudio se precarga en Supabase Auth y se sincroniza con `public.usuarios` (las contraseñas de desarrollo están en el script de seed):
 
-- **Administrador**:
-  - Email: `admin@sechub.test`
-  - Contraseña: `DevOnly-Admin-2024!`
-  - Rol: `ADMIN` (acceso a todos los sectores y parametrizaciones).
-- **Lectura / Visualizador**:
-  - Email: `viewer@sechub.test`
-  - Contraseña: `DevOnly-Viewer-2024!`
-  - Rol: `LECTURA` (sin privilegios de escritura).
+| Usuario | Perfil | Qué ve y qué hace |
+|---|---|---|
+| `admin@sechub.test` | **Titular** (abogado + `es_titular`) | Ve todo el estudio, modifica cualquier carpeta, la reasigna y administra el equipo. |
+| `abogado1@sechub.test` | **Abogado** | Solo sus carpetas y su agenda. Abre carpetas a su nombre y las modifica. |
+| `abogado2@sechub.test` | **Abogado** | Ídem, con otra cartera de casos. |
+| `asistente@sechub.test` | **Asistente** (procuración) | Ve todo, agenda audiencias, carga y vincula actas. No abre ni edita carpetas. |
 
-Estos usuarios se generan ejecutando el script [`packages/db/src/seeds/seed-dev-users.sql`](../packages/db/src/seeds/seed-dev-users.sql) contra Supabase.
+El usuario de lectura anterior (`viewer@sechub.test`) queda desactivado: ese perfil no existe en un estudio. El modelo está documentado en [ADR 0002](adr/0002-permisos-por-abogado-responsable.md).
+
+Estos usuarios se generan ejecutando el script [`packages/db/src/seeds/seed-dev-users.sql`](../packages/db/src/seeds/seed-dev-users.sql) contra Supabase, después de aplicar la migración `0011`. Luego `pnpm seed:demo` reparte las carpetas de demo entre los abogados.
 
 ---
 

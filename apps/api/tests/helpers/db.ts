@@ -54,7 +54,9 @@ export async function seedUser(
   overrides: {
     email?: string;
     password?: string;
-    role?: RoleCode;
+    role?: RoleCode | null;
+    /** Solo aplica a abogados. Por defecto, un abogado de prueba es titular. */
+    esTitular?: boolean;
     supabaseUserId?: string | null;
     activo?: boolean;
   } = {},
@@ -74,7 +76,8 @@ export async function seedUser(
 
   const email = overrides.email ?? "test@estudioszlit.com.ar";
   const password = overrides.password ?? "Secr3tP@ss";
-  const role = overrides.role ?? ROLE_CODES.ADMIN;
+  const role = overrides.role === undefined ? ROLE_CODES.ABOGADO : overrides.role;
+  const esTitular = overrides.esTitular ?? role === ROLE_CODES.ABOGADO;
   const supabaseUserId =
     overrides.supabaseUserId === undefined ? randomUUID() : overrides.supabaseUserId;
 
@@ -85,10 +88,11 @@ export async function seedUser(
       estudioId: estudio.id,
       supabaseUserId,
       activo: overrides.activo ?? true,
+      esTitular,
     })
     .returning();
 
-  await db.execute(sql`
+  if (role) await db.execute(sql`
     INSERT INTO usuarios_roles (usuario_id, rol_id)
     SELECT ${user.id}, roles.id
     FROM roles
@@ -114,6 +118,5 @@ export async function resetDatabase(db: Database): Promise<void> {
   await db.delete(carpetas);
   await db.delete(empleadores);
   await db.execute(sql`DELETE FROM usuarios_roles`);
-  await db.execute(sql`DELETE FROM usuarios_sectores`);
   await db.delete(usuarios);
 }

@@ -9,12 +9,12 @@ import {
 } from "@sechub/db";
 import { ActaLinkError, linkActa } from "../acta-linking.js";
 import {
-  canWriteSector,
-  getWriteAuthorization,
-  requireWriteAuthorization,
+  getAccess,
+  puedeTrabajarEnCarpeta,
+  requireAccess,
   sendForbidden,
 } from "../authorization.js";
-import { getAuthenticatedUser, UUID_REGEX } from "../utils/auth.js";
+import { UUID_REGEX } from "../utils/auth.js";
 
 export interface ActasPluginOptions {
   db: Database;
@@ -58,9 +58,10 @@ export async function actasRoutes(
 ) {
   const { db } = opts;
 
-  app.get("/actas/orphan", async (request, reply) => {
-    const user = await getAuthenticatedUser(request, reply, db);
-    if (!user) return;
+  // La bandeja de actas sin carpeta la ven todos los perfiles: un acta todavía
+  // no pertenece a ningún expediente, y cualquiera puede reconocer la suya.
+  app.get("/actas/orphan", { preValidation: requireAccess(db) }, async (request, reply) => {
+    const { user } = getAccess(request);
 
     const data = await db
       .select()
@@ -82,7 +83,7 @@ export async function actasRoutes(
       fecha?: string | null;
     };
   }>("/actas", {
-    preValidation: requireWriteAuthorization(db),
+    preValidation: requireAccess(db),
     schema: {
       body: {
         type: "object",
@@ -99,7 +100,7 @@ export async function actasRoutes(
       },
     },
   }, async (request, reply) => {
-    const { user, authorization } = getWriteAuthorization(request);
+    const { user, authorization } = getAccess(request);
     const {
       carpetaId,
       expediente,
@@ -135,7 +136,7 @@ export async function actasRoutes(
     if (carpetaId !== undefined && carpetaId !== null) {
       const carpeta = await checkCarpeta(db, carpetaId, user.estudioId, reply);
       if (!carpeta) return;
-      if (!canWriteSector(authorization, carpeta.sectorActualId)) {
+      if (!puedeTrabajarEnCarpeta(authorization, carpeta)) {
         return sendForbidden(reply);
       }
     }
@@ -161,7 +162,7 @@ export async function actasRoutes(
     Params: { id: string };
     Body: { carpetaId: string; audienciaId: string };
   }>("/actas/:id/vincular", {
-    preValidation: requireWriteAuthorization(db),
+    preValidation: requireAccess(db),
     schema: {
       body: {
         type: "object",
@@ -173,7 +174,7 @@ export async function actasRoutes(
       },
     },
   }, async (request, reply) => {
-    const { user, authorization } = getWriteAuthorization(request);
+    const { user, authorization } = getAccess(request);
     const { id } = request.params;
     const { carpetaId, audienciaId } = request.body;
 

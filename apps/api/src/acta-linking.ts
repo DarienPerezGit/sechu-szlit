@@ -10,7 +10,7 @@ import {
   type Database,
   tiposActa,
 } from "@sechub/db";
-import { canWriteSector, type AuthorizationContext } from "./authorization.js";
+import { puedeTrabajarEnCarpeta, type AuthorizationContext } from "./authorization.js";
 
 const ACTA_TYPE_TO_CASE_STATUS: Record<string, string> = {
   [ACTA_TYPE_CODES.ACUERDO]: "conciliado",
@@ -66,7 +66,7 @@ export async function linkActa(
           ),
         )
         .limit(1);
-      if (!linkedCarpeta || !canWriteSector(input.authorization, linkedCarpeta.sectorActualId)) {
+      if (!linkedCarpeta || !puedeTrabajarEnCarpeta(input.authorization, linkedCarpeta)) {
         throw new ActaLinkError(403, "No autorizado");
       }
       throw new ActaLinkError(400, "El acta ya está vinculada a una carpeta");
@@ -108,7 +108,8 @@ export async function linkActa(
       throw new ActaLinkError(400, "La carpeta especificada no existe o no pertenece a su estudio");
     }
 
-    if (!canWriteSector(input.authorization, carpeta.carpeta.sectorActualId)) {
+    // Asistente, titular o el abogado responsable de la carpeta.
+    if (!puedeTrabajarEnCarpeta(input.authorization, carpeta.carpeta)) {
       throw new ActaLinkError(403, "No autorizado");
     }
 

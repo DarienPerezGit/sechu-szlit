@@ -24,6 +24,9 @@ export const carpetas = pgTable("carpetas", {
   demandada: text("demandada").notNull(),
   empleadorId: uuid("empleador_id")
     .references(() => empleadores.id),
+  abogadoResponsableId: uuid("abogado_responsable_id")
+    .notNull()
+    .references(() => usuarios.id),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -34,6 +37,7 @@ export const carpetas = pgTable("carpetas", {
   return {
     estudioSectorIdx: index("carpetas_estudio_sector_idx").on(table.estudioId, table.sectorActualId),
     estudioEstadoIdx: index("carpetas_estudio_estado_idx").on(table.estudioId, table.estadoCasoId),
+    estudioAbogadoIdx: index("carpetas_estudio_abogado_idx").on(table.estudioId, table.abogadoResponsableId),
   };
 });
 

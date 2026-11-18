@@ -12,6 +12,8 @@ export const usuarios = pgTable("usuarios", {
     .references(() => estudios.id),
   supabaseUserId: uuid("supabase_user_id").unique(),
   activo: boolean("activo").notNull().default(true),
+  /** Abogado con permiso de administración del estudio. */
+  esTitular: boolean("es_titular").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

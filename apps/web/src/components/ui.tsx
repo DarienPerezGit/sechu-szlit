@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import type { Catalogos, MiembroEquipo } from "../lib/domain";
+import type { Carpeta, Catalogos, MiembroEquipo, Perfil } from "../lib/domain";
 import { ApiError } from "../lib/api";
 import { colorFor, alias } from "../lib/format";
 
@@ -9,8 +9,31 @@ export interface AppContextValue {
   catalogos: Catalogos;
   equipo: MiembroEquipo[];
   userId: string;
+  perfil: Perfil | null;
   toast: (message: string) => void;
 }
+
+/*
+ * Espejo en pantalla de las políticas de la API (apps/api/src/authorization.ts).
+ * Solo ocultan lo que el servidor rechazaría: la regla real vive en la API.
+ */
+export const puedeCrearCarpeta = (ctx: Pick<AppContextValue, "perfil">) =>
+  ctx.perfil === "titular" || ctx.perfil === "abogado";
+
+export const puedeEditarCarpeta = (
+  ctx: Pick<AppContextValue, "perfil" | "userId">,
+  carpeta: Pick<Carpeta, "abogadoResponsableId">,
+) => ctx.perfil === "titular" || (ctx.perfil === "abogado" && carpeta.abogadoResponsableId === ctx.userId);
+
+/** El abogado común agenda solo para sí; el titular y el asistente, para cualquiera. */
+export const agendaPara = (ctx: Pick<AppContextValue, "perfil" | "userId" | "equipo">) =>
+  ctx.perfil === "abogado" ? ctx.equipo.filter((m) => m.id === ctx.userId) : ctx.equipo;
+
+export const PERFIL_LABEL: Record<Perfil, string> = {
+  titular: "Titular",
+  abogado: "Abogado/a",
+  asistente: "Asistente",
+};
 
 export const AppContext = createContext<AppContextValue | null>(null);
 

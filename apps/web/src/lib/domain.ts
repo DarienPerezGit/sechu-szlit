@@ -24,7 +24,12 @@ export interface Catalogos {
 export interface MiembroEquipo {
   id: string;
   email: string;
+  rol: "abogado" | "asistente" | null;
+  esTitular: boolean;
 }
+
+/** Perfil resuelto por la API: el titular es un abogado con permiso extra. */
+export type Perfil = "titular" | "abogado" | "asistente";
 
 /* ---------- Dominio ---------- */
 
@@ -37,6 +42,7 @@ export interface Carpeta {
   caratula: string;
   demandada: string;
   empleadorId: string | null;
+  abogadoResponsableId: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -121,6 +127,7 @@ export interface NuevaCarpeta {
   expediente: string;
   caratula: string;
   demandada: string;
+  abogadoResponsableId?: string;
 }
 export const crearCarpeta = (body: NuevaCarpeta) =>
   apiFetch<Carpeta>("/api/carpetas", { method: "POST", ...json(body) });

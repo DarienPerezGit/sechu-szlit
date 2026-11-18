@@ -18,12 +18,15 @@ import {
   Modal,
   TipoBadge,
   errorMessage,
+  puedeCrearCarpeta,
+  puedeEditarCarpeta,
   useApp,
   useAsync,
 } from "../components/ui";
 
 export function CarpetasView() {
-  const { catalogos } = useApp();
+  const app = useApp();
+  const { catalogos } = app;
   const { data: carpetas, error, loading, reload } = useAsync(fetchCarpetas, []);
   const [texto, setTexto] = useState("");
   const [estadoId, setEstadoId] = useState("");
@@ -51,9 +54,11 @@ export function CarpetasView() {
     <section aria-label="Carpetas">
       <div className="row-flex section-head">
         <p className="hint">Legajos de casos. Cada carpeta avanza por los sectores del estudio.</p>
-        <button type="button" className="primary" onClick={() => setCreando(true)}>
-          ➕ Nueva carpeta
-        </button>
+        {puedeCrearCarpeta(app) && (
+          <button type="button" className="primary" onClick={() => setCreando(true)}>
+            ➕ Nueva carpeta
+          </button>
+        )}
       </div>
 
       <div className="list-controls">
@@ -140,12 +145,14 @@ export function CarpetasView() {
 }
 
 function NuevaCarpetaModal({ onClose, onCreated }: { onClose: () => void; onCreated: (c: Carpeta) => void }) {
-  const { catalogos, toast } = useApp();
+  const { catalogos, equipo, perfil, userId, toast } = useApp();
   const pipeline = catalogos.sectores;
+  const abogados = equipo.filter((m) => m.rol === "abogado");
   const [form, setForm] = useState({
     caratula: "",
     expediente: "",
     demandada: "",
+    abogadoResponsableId: userId,
     sectorActualId: pipeline[0]?.id ?? 0,
     estadoCasoId: catalogos.estadosCaso.find((e) => e.codigo === "en_tramite")?.id ?? catalogos.estadosCaso[0]?.id ?? 0,
   });
@@ -223,6 +230,19 @@ function NuevaCarpetaModal({ onClose, onCreated }: { onClose: () => void; onCrea
               ))}
             </select>
           </div>
+          {perfil === "titular" && (
+            <div className="form-row">
+              <label htmlFor="cp-responsable">Abogado responsable</label>
+              <select id="cp-responsable" value={form.abogadoResponsableId} onChange={set("abogadoResponsableId")}>
+                {abogados.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.email}
+                    {m.esTitular ? " (titular)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </form>
     </Modal>
@@ -230,7 +250,8 @@ function NuevaCarpetaModal({ onClose, onCreated }: { onClose: () => void; onCrea
 }
 
 export function CarpetaDetalle({ id, onClose }: { id: string; onClose: () => void }) {
-  const { catalogos, toast } = useApp();
+  const app = useApp();
+  const { catalogos, equipo, perfil, toast } = app;
   const carpeta = useAsync(() => fetchCarpeta(id), [id]);
   const audiencias = useAsync(() => fetchAudienciasDeCarpeta(id), [id]);
   const bitacora = useAsync(() => fetchBitacora(id), [id]);
@@ -244,14 +265,20 @@ export function CarpetaDetalle({ id, onClose }: { id: string; onClose: () => voi
     bitacora.reload();
   };
 
-  async function cambiar(campo: "estadoCasoId" | "sectorActualId", valor: number) {
+  async function cambiar(campo: "estadoCasoId" | "sectorActualId" | "abogadoResponsableId", valor: number | string) {
     const c = carpeta.data;
     if (!c) return;
     setGuardando(true);
     setConflicto(null);
     try {
       await actualizarCarpeta(c.id, { version: c.version, [campo]: valor });
-      toast(campo === "estadoCasoId" ? "Estado actualizado" : "Carpeta movida de sector");
+      toast(
+        campo === "estadoCasoId"
+          ? "Estado actualizado"
+          : campo === "sectorActualId"
+            ? "Carpeta movida de sector"
+            : "Carpeta reasignada",
+      );
     } catch (err) {
       setConflicto(
         err instanceof ApiError && err.status === 409
@@ -265,6 +292,8 @@ export function CarpetaDetalle({ id, onClose }: { id: string; onClose: () => voi
   }
 
   const c = carpeta.data;
+  const editable = c ? puedeEditarCarpeta(app, c) : false;
+  const responsable = c ? equipo.find((m) => m.id === c.abogadoResponsableId) : undefined;
   return (
     <>
       <Modal title="📁 Carpeta del caso" onClose={onClose} footer={<button type="button" className="primary" onClick={onClose}>Cerrar</button>}>
@@ -277,13 +306,20 @@ export function CarpetaDetalle({ id, onClose }: { id: string; onClose: () => voi
               <br />
               <span className="small">
                 Expte. {c.expediente} · Demandada: {c.demandada} · versión {c.version}
+                <br />
+                Abogado responsable: {responsable?.email ?? "—"}
               </span>
             </div>
+            {!editable && (
+              <p className="small muted">
+                Solo el titular o el abogado responsable modifican el estado y el sector de esta carpeta.
+              </p>
+            )}
             {conflicto && <div className="warn-box">{conflicto}</div>}
             <div className="form-grid-2">
               <div className="form-row">
                 <label htmlFor="det-estado">Estado del caso</label>
-                <select id="det-estado" disabled={guardando} value={c.estadoCasoId} onChange={(e) => cambiar("estadoCasoId", Number(e.target.value))}>
+                <select id="det-estado" disabled={guardando || !editable} value={c.estadoCasoId} onChange={(e) => cambiar("estadoCasoId", Number(e.target.value))}>
                   {catalogos.estadosCaso.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.nombre}
@@ -293,7 +329,7 @@ export function CarpetaDetalle({ id, onClose }: { id: string; onClose: () => voi
               </div>
               <div className="form-row">
                 <label htmlFor="det-sector">Sector actual</label>
-                <select id="det-sector" disabled={guardando} value={c.sectorActualId} onChange={(e) => cambiar("sectorActualId", Number(e.target.value))}>
+                <select id="det-sector" disabled={guardando || !editable} value={c.sectorActualId} onChange={(e) => cambiar("sectorActualId", Number(e.target.value))}>
                   {catalogos.sectores.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.nombre}
@@ -301,6 +337,25 @@ export function CarpetaDetalle({ id, onClose }: { id: string; onClose: () => voi
                   ))}
                 </select>
               </div>
+              {perfil === "titular" && (
+                <div className="form-row">
+                  <label htmlFor="det-responsable">Abogado responsable</label>
+                  <select
+                    id="det-responsable"
+                    disabled={guardando}
+                    value={c.abogadoResponsableId}
+                    onChange={(e) => cambiar("abogadoResponsableId", e.target.value)}
+                  >
+                    {equipo
+                      .filter((m) => m.rol === "abogado")
+                      .map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.email}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
             </div>
           </>
         )}

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { crearAudiencia, type Carpeta } from "../lib/domain";
 import { toYmd } from "../lib/format";
-import { Modal, errorMessage, useApp } from "./ui";
+import { Modal, agendaPara, errorMessage, useApp } from "./ui";
 
 /**
  * Alta de audiencia. Con `carpeta` queda vinculada a ese caso; sin ella se
@@ -20,7 +20,9 @@ export function AudienciaForm({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { catalogos, equipo, userId, toast } = useApp();
+  const app = useApp();
+  const { catalogos, userId, toast } = app;
+  const equipo = agendaPara(app);
   const [fecha, setFecha] = useState(fechaInicial ?? toYmd(new Date()));
   const [hora, setHora] = useState("10:00");
   const [tipoId, setTipoId] = useState(catalogos.tiposAudiencia[0]?.id ?? 0);
