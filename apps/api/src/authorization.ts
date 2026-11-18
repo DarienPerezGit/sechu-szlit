@@ -15,13 +15,14 @@
  * cuerpo (400, validación de esquema) → existencia (404) → acceso a ese
  * recurso (403).
  */
-import { eq, or, type SQL } from "drizzle-orm";
+import { and, eq, or, type SQL } from "drizzle-orm";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import {
   audiencias,
   carpetas,
   ROLE_CODES,
   roles,
+  usuarios,
   usuariosRoles,
   type Carpeta,
   type Database,
@@ -136,9 +137,50 @@ export function audienciasSinCarpetaVisibles(a: AuthorizationContext): SQL | und
 export const puedeAgendarPara = (a: AuthorizationContext, abogadoId: string) =>
   !actuaSoloSobreLoPropio(a) || abogadoId === a.usuarioId;
 
+/**
+ * Editar una audiencia: la misma regla que la agenda, así cada uno edita
+ * exactamente lo que ve. El abogado común edita las audiencias a las que
+ * asiste y las de sus carpetas.
+ */
+export const puedeEditarAudiencia = (
+  a: AuthorizationContext,
+  audiencia: { abogadoId: string },
+  carpeta: CarpetaOwnership | null,
+) => !actuaSoloSobreLoPropio(a) || audiencia.abogadoId === a.usuarioId || (carpeta !== null && esPropia(a, carpeta));
+
+/**
+ * Reasignar una audiencia a otro abogado (cubrir a un colega que falta).
+ * Delegar pasa por el titular o por procuración: un abogado no le carga
+ * trabajo a otro, que tendría una audiencia de una carpeta que no puede ver.
+ */
+export const puedeReasignarAudiencia = (a: AuthorizationContext) => esTitular(a) || esAsistente(a);
+
 // ── Equipo ──────────────────────────────────────────────────────────────────
 
 export const puedeAdministrarEquipo = (a: AuthorizationContext) => esTitular(a);
+
+/**
+ * Quién ve al equipo completo: quien asigna trabajo (titular y asistente).
+ * El abogado común no asigna a nadie, así que solo se ve a sí mismo.
+ */
+export const veTodoElEquipo = (a: AuthorizationContext) => !actuaSoloSobreLoPropio(a);
+
+/** Solo un abogado activo del estudio lleva una carpeta o asiste a una audiencia. */
+export async function esAbogadoActivo(db: Database, usuarioId: string, estudioId: string): Promise<boolean> {
+  const [abogado] = await db
+    .select({ id: usuarios.id })
+    .from(usuarios)
+    .innerJoin(usuariosRoles, eq(usuariosRoles.usuarioId, usuarios.id))
+    .innerJoin(roles, eq(roles.id, usuariosRoles.rolId))
+    .where(and(
+      eq(usuarios.id, usuarioId),
+      eq(usuarios.estudioId, estudioId),
+      eq(usuarios.activo, true),
+      eq(roles.codigo, ROLE_CODES.ABOGADO),
+    ))
+    .limit(1);
+  return abogado !== undefined;
+}
 
 // ── Middleware ──────────────────────────────────────────────────────────────
 
