@@ -34,21 +34,28 @@ WHERE "id" IN (
 );
 --> statement-breakpoint
 
--- 3. Convertir asignaciones: admin y responsable_sector pasan a abogado;
---    lectura pasa a asistente. Un usuario con varios roles viejos recibe uno solo.
+-- 3. Convertir asignaciones: admin y responsable_sector pasan a abogado.
+--    Un usuario solo de lectura NO pasa a asistente: el asistente agenda y
+--    vincula actas (lo que cambia el estado del caso), así que sería darle
+--    permisos que nunca tuvo. Queda desactivado y sin rol, para que el titular
+--    decida a mano qué perfil le corresponde.
 INSERT INTO "usuarios_roles" ("usuario_id", "rol_id")
-SELECT legacy.usuario_id, nuevo.id
-FROM (
-  SELECT ur.usuario_id,
-         bool_or(r.codigo IN ('admin', 'responsable_sector')) AS es_abogado
+SELECT DISTINCT ur.usuario_id, nuevo.id
+FROM usuarios_roles ur
+INNER JOIN roles r ON r.id = ur.rol_id
+CROSS JOIN (SELECT id FROM roles WHERE codigo = 'abogado') AS nuevo
+WHERE r.codigo IN ('admin', 'responsable_sector')
+ON CONFLICT ("usuario_id", "rol_id") DO NOTHING;
+--> statement-breakpoint
+
+UPDATE "usuarios" SET "activo" = false
+WHERE "id" IN (
+  SELECT ur.usuario_id
   FROM usuarios_roles ur
   INNER JOIN roles r ON r.id = ur.rol_id
-  WHERE r.codigo IN ('admin', 'responsable_sector', 'lectura')
   GROUP BY ur.usuario_id
-) AS legacy
-INNER JOIN roles nuevo
-  ON nuevo.codigo = CASE WHEN legacy.es_abogado THEN 'abogado' ELSE 'asistente' END
-ON CONFLICT ("usuario_id", "rol_id") DO NOTHING;
+  HAVING bool_and(r.codigo = 'lectura')
+);
 --> statement-breakpoint
 
 DELETE FROM "usuarios_roles"
@@ -63,7 +70,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS "usuarios_roles_un_rol_por_usuario" ON "usuari
 --> statement-breakpoint
 
 -- 5. Cada carpeta tiene un abogado responsable. Las existentes se asignan al
---    titular del estudio (o, si no hay, al primer abogado).
+--    titular del estudio (o, si no hay, al primer abogado). No depende del
+--    seed de demo: después de esta migración ninguna carpeta queda sin
+--    responsable, y si no se puede asignar la migración falla entera.
 ALTER TABLE "carpetas" ADD COLUMN IF NOT EXISTS "abogado_responsable_id" uuid;
 --> statement-breakpoint
 

@@ -9,7 +9,7 @@ import {
   fetchCarpetas,
   type Carpeta,
 } from "../lib/domain";
-import { describirAccion, estadoCasoTone, fmtDate, fmtDateTime, fmtHora } from "../lib/format";
+import { alias, describirAccion, estadoCasoTone, fmtDate, fmtDateTime, fmtHora } from "../lib/format";
 import { AudienciaForm } from "../components/AudienciaForm";
 import {
   AbogadoTag,
@@ -26,9 +26,13 @@ import {
 
 export function CarpetasView() {
   const app = useApp();
-  const { catalogos } = app;
+  const { catalogos, equipo, perfil, userId } = app;
   const { data: carpetas, error, loading, reload } = useAsync(fetchCarpetas, []);
   const [texto, setTexto] = useState("");
+  // El abogado común solo recibe sus carpetas: el filtro es para quien ve todo el estudio.
+  const [responsableId, setResponsableId] = useState("");
+  const abogados = equipo.filter((m) => m.rol === "abogado");
+  const emailPorId = useMemo(() => new Map(equipo.map((m) => [m.id, m.email])), [equipo]);
   const [estadoId, setEstadoId] = useState("");
   const [sectorId, setSectorId] = useState("");
   const [creando, setCreando] = useState(false);
@@ -42,13 +46,14 @@ export function CarpetasView() {
     return (carpetas ?? [])
       .filter((c) => !estadoId || c.estadoCasoId === Number(estadoId))
       .filter((c) => !sectorId || c.sectorActualId === Number(sectorId))
+      .filter((c) => !responsableId || c.abogadoResponsableId === responsableId)
       .filter(
         (c) =>
           !q ||
           [c.caratula, c.expediente, c.demandada].some((field) => field.toLowerCase().includes(q)),
       )
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [carpetas, texto, estadoId, sectorId]);
+  }, [carpetas, texto, estadoId, sectorId, responsableId]);
 
   return (
     <section aria-label="Carpetas">
@@ -85,13 +90,27 @@ export function CarpetasView() {
             </option>
           ))}
         </select>
+        {perfil !== "abogado" && (
+          <select aria-label="Filtrar por responsable" value={responsableId} onChange={(e) => setResponsableId(e.target.value)}>
+            <option value="">Todos los responsables</option>
+            {abogados.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.id === userId ? "Mis carpetas" : alias(m.email)}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {loading && !carpetas && <Loading />}
       {error ? <ErrorBox error={error} onRetry={reload} /> : null}
       {carpetas && lista.length === 0 && (
         <div className="empty">
-          {carpetas.length === 0 ? "Todavía no hay carpetas. Creá la primera." : "Ninguna carpeta coincide con el filtro."}
+          {carpetas.length === 0
+            ? perfil === "abogado"
+              ? "Todavía no tenés carpetas a tu cargo. Creá la primera o pedile al titular que te asigne una."
+              : "Todavía no hay carpetas. Creá la primera."
+            : "Ninguna carpeta coincide con el filtro."}
         </div>
       )}
 
@@ -109,6 +128,8 @@ export function CarpetasView() {
                 <p className="card-meta">
                   <span className={`pill pill-${estadoCasoTone(estado?.codigo)}`}>{estado?.nombre ?? "—"}</span>
                   <span className="sector-tag">{sector?.nombre ?? "—"}</span>
+                  <span className="small muted">a cargo de</span>{" "}
+                  <AbogadoTag email={emailPorId.get(c.abogadoResponsableId)} />
                 </p>
               </div>
               <div className="btn-group">
@@ -310,16 +331,25 @@ export function CarpetaDetalle({ id, onClose }: { id: string; onClose: () => voi
                 Abogado responsable: {responsable?.email ?? "—"}
               </span>
             </div>
-            {!editable && (
-              <p className="small muted">
-                Solo el titular o el abogado responsable modifican el estado y el sector de esta carpeta.
-              </p>
-            )}
+
             {conflicto && <div className="warn-box">{conflicto}</div>}
+            {!editable ? (
+              <p className="card-meta">
+                <span className={`pill pill-${estadoCasoTone(catalogos.estadosCaso.find((e) => e.id === c.estadoCasoId)?.codigo)}`}>
+                  {catalogos.estadosCaso.find((e) => e.id === c.estadoCasoId)?.nombre ?? "—"}
+                </span>
+                <span className="sector-tag">{catalogos.sectores.find((s) => s.id === c.sectorActualId)?.nombre ?? "—"}</span>
+                <span className="small muted">a cargo de</span> <AbogadoTag email={responsable?.email} />
+                <br />
+                <span className="small muted">
+                  El estado y el sector los cambia {alias(responsable?.email)} o el titular del estudio.
+                </span>
+              </p>
+            ) : (
             <div className="form-grid-2">
               <div className="form-row">
                 <label htmlFor="det-estado">Estado del caso</label>
-                <select id="det-estado" disabled={guardando || !editable} value={c.estadoCasoId} onChange={(e) => cambiar("estadoCasoId", Number(e.target.value))}>
+                <select id="det-estado" disabled={guardando} value={c.estadoCasoId} onChange={(e) => cambiar("estadoCasoId", Number(e.target.value))}>
                   {catalogos.estadosCaso.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.nombre}
@@ -329,7 +359,7 @@ export function CarpetaDetalle({ id, onClose }: { id: string; onClose: () => voi
               </div>
               <div className="form-row">
                 <label htmlFor="det-sector">Sector actual</label>
-                <select id="det-sector" disabled={guardando || !editable} value={c.sectorActualId} onChange={(e) => cambiar("sectorActualId", Number(e.target.value))}>
+                <select id="det-sector" disabled={guardando} value={c.sectorActualId} onChange={(e) => cambiar("sectorActualId", Number(e.target.value))}>
                   {catalogos.sectores.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.nombre}
@@ -357,6 +387,7 @@ export function CarpetaDetalle({ id, onClose }: { id: string; onClose: () => voi
                 </div>
               )}
             </div>
+            )}
           </>
         )}
 

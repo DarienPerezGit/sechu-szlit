@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
+  bitacoraCarpetas,
   carpetas,
   estadosActa,
   estadosCaso,
@@ -217,6 +218,15 @@ describe("permisos por perfil (titular, abogado, asistente)", async () => {
     const [carpeta] = await db.select().from(carpetas).where(eq(carpetas.id, ajena.id));
     const [conciliado] = await db.select().from(estadosCaso).where(eq(estadosCaso.codigo, "conciliado"));
     expect(carpeta.estadoCasoId).toBe(conciliado.id);
+    expect(carpeta.version).toBe(ajena.version + 1);
+
+    // La bitácora atribuye el cambio de estado al asistente que vinculó el acta.
+    const [entrada] = await db
+      .select()
+      .from(bitacoraCarpetas)
+      .where(and(eq(bitacoraCarpetas.carpetaId, ajena.id), eq(bitacoraCarpetas.accionRealizada, "acta_vinculada")));
+    expect(entrada.usuarioId).toBe(asistente.id);
+    expect(entrada.metadata).toMatchObject({ estado_anterior: "en_tramite", estado_nuevo: "conciliado" });
   });
 
   it("un cambio de rol o de titularidad aplica en el siguiente pedido", async () => {

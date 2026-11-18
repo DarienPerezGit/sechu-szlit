@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { config } from "dotenv";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
-import { readFileSync, readdirSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { Client, Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { dirname, join } from "node:path";
@@ -475,5 +476,63 @@ describe("pnpm db:migrate", () => {
       WHERE table_schema = 'public' AND table_name = 'usuarios' AND column_name = 'password_hash'
     `);
     expect(passwordHashCol.rows).toEqual([]);
+  });
+
+  it("0011 converts legacy roles without escalating lectura and assigns every carpeta a responsable", async () => {
+    const url = await createDatabase();
+    const files = readdirSync(migrationDir).filter((f) => f.endsWith(".sql")).sort();
+    const target = "0011_roles_titular_abogado_asistente.sql";
+    // Historia hasta 0010 con el ejecutor real, en una carpeta aparte.
+    const before0011 = mkdtempSync(join(tmpdir(), "sechub-pre-0011-"));
+    for (const file of files.slice(0, files.indexOf(target))) {
+      copyFileSync(join(migrationDir, file), join(before0011, file));
+    }
+    const pool = new Pool({ connectionString: url });
+    const migrateWith = (directory?: string) => runMigrations(drizzle(pool, { schema }), directory);
+    await migrateWith(before0011);
+
+    const usuario = async (email: string, rolesViejos: string[]) => {
+      const { rows: [u] } = await query(url, `
+        INSERT INTO usuarios (email, estudio_id) SELECT $1, id FROM estudios LIMIT 1 RETURNING id
+      `, [email]);
+      for (const rol of rolesViejos) {
+        await query(url, `INSERT INTO usuarios_roles (usuario_id, rol_id) SELECT $1, id FROM roles WHERE codigo = $2`, [u.id, rol]);
+      }
+      return u.id as string;
+    };
+    const titular = await usuario("titular@test.com", ["admin"]);
+    const responsable = await usuario("responsable@test.com", ["responsable_sector"]);
+    const lectura = await usuario("lectura@test.com", ["lectura"]);
+    const mixto = await usuario("mixto@test.com", ["lectura", "responsable_sector"]);
+    for (const expediente of ["EXP-LEGACY-1", "EXP-LEGACY-2"]) {
+      await query(url, `
+        INSERT INTO carpetas (estudio_id, sector_actual_id, estado_caso_id, expediente, caratula, demandada)
+        SELECT e.id, (SELECT id FROM sectores LIMIT 1), (SELECT id FROM estados_caso LIMIT 1), $1, 'Legacy c/ Legacy', 'Legacy S.A.'
+        FROM estudios e LIMIT 1
+      `, [expediente]);
+    }
+
+    try {
+      expect((await migrateWith()).applied).toBe(1);
+    } finally {
+      await pool.end();
+      rmSync(before0011, { recursive: true, force: true });
+    }
+
+    const perfil = async (id: string) => (await query(url, `
+      SELECT u.activo, u.es_titular, r.codigo AS rol
+      FROM usuarios u
+      LEFT JOIN usuarios_roles ur ON ur.usuario_id = u.id
+      LEFT JOIN roles r ON r.id = ur.rol_id
+      WHERE u.id = $1
+    `, [id])).rows;
+    expect(await perfil(titular)).toEqual([{ activo: true, es_titular: true, rol: "abogado" }]);
+    expect(await perfil(responsable)).toEqual([{ activo: true, es_titular: false, rol: "abogado" }]);
+    expect(await perfil(mixto)).toEqual([{ activo: true, es_titular: false, rol: "abogado" }]);
+    // Lectura no pasa a asistente: queda sin rol y desactivado.
+    expect(await perfil(lectura)).toEqual([{ activo: false, es_titular: false, rol: null }]);
+
+    const carpetas = await query(url, `SELECT DISTINCT abogado_responsable_id AS id FROM carpetas`);
+    expect(carpetas.rows).toEqual([{ id: titular }]);
   });
 });

@@ -32,9 +32,11 @@ El prototipo que aportó el propio estudio (`docs/design/prototipo-szlit.html`) 
 ## Consecuencias
 
 - Migración `0011_roles_titular_abogado_asistente.sql`:
-  - convierte `admin` en titular, `responsable_sector` en abogado y `lectura` en asistente;
+  - convierte `admin` en titular y `responsable_sector` en abogado;
+  - deja **sin rol y desactivado** a quien solo tenía `lectura`: pasarlo a asistente le daría permisos que nunca tuvo (agendar y vincular actas, que cambia el estado del caso). El titular decide a mano qué perfil le corresponde;
   - asigna las carpetas existentes al titular;
   - fija un rol por usuario y elimina `usuarios_sectores`.
 - El abogado común deja de ver las carpetas ajenas. Si consulta una por id recibe 403, no 404, porque la existencia se valida antes que el acceso.
 - Los honorarios del modelo de referencia no aplican todavía: SECHUB no los gestiona.
+- Antes de aplicar la 0011 en producción: dump de la base (`docs/supabase-backup-restore.md`). Después, en la misma ventana, migración y merge, porque código y base tienen que cambiar juntos.
 - Queda pendiente una pantalla de administración del equipo. La API ya existe y la prueba `permisos.test.ts` la cubre.
