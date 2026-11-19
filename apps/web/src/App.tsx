@@ -4,12 +4,14 @@ import { Shell } from "./components/Shell";
 import { ApiError, apiFetch, isDeactivatedError } from "./lib/api";
 import { getSupabaseClient } from "./lib/supabase";
 
-/** User payload returned by GET /api/auth/me (identidad + roles resueltos). */
+/** User payload returned by GET /api/auth/me (identidad + perfil resuelto). */
 export interface MeUser {
   id: string;
   email: string;
   role: string | null;
   roles: string[];
+  esTitular: boolean;
+  perfil: "titular" | "abogado" | "asistente" | null;
   estudioId: string;
 }
 

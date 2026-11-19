@@ -254,3 +254,19 @@ button.cal-day { text-align: left; display: flex; flex-direction: column; justif
 /* Columnas del calendario: permiten achicarse en mobile en vez de desbordar. */
 .calendar-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .cal-day { min-width: 0; overflow: hidden; }
+
+/* ---------- Inicio y Equipo ---------- */
+.metric-link { display: block; width: 100%; text-align: left; border: 1px solid transparent; font: inherit; color: inherit; }
+.metric-link:hover:not(:disabled) { background: var(--surface); border-color: var(--border-2); }
+.metric-link:focus-visible, .tab-btn:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+.metric-alerta { background: var(--warning-bg); }
+.metric-alerta .val { color: var(--warning); }
+.tabla { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.tabla th { text-align: left; font-size: 11px; font-weight: 600; color: var(--text-2); text-transform: uppercase; padding: 8px 12px; background: var(--surface-2); }
+.tabla td { padding: 8px 12px; border-top: 1px solid var(--border); vertical-align: middle; }
+.tabla tr.inactivo td { color: var(--text-3); }
+.tabla select { width: auto; padding: 4px 8px; font-size: 13px; }
+@media (max-width: 640px) {
+  .tabla { display: block; overflow-x: auto; }
+}
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

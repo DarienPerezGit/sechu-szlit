@@ -11,8 +11,10 @@ const ME_PAYLOAD = {
   user: {
     id: "u-1",
     email: "abogada@estudio.com",
-    role: "ADMIN",
-    roles: ["ADMIN", "LECTURA"],
+    role: "abogado",
+    roles: ["abogado"],
+    esTitular: true,
+    perfil: "titular",
     estudioId: "e-1",
   },
 };
@@ -47,8 +49,7 @@ describe("App auth gate", () => {
 
     expect(await screen.findByText("SECHUB · Estudio Szlit")).toBeTruthy();
     expect(screen.getByText("abogada@estudio.com")).toBeTruthy();
-    expect(screen.getByText("ADMIN")).toBeTruthy();
-    expect(screen.getByText("LECTURA")).toBeTruthy();
+    expect(screen.getByText("Titular")).toBeTruthy();
   });
 
   it("shows the deactivated account state on API 403", async () => {

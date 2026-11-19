@@ -108,14 +108,14 @@ describe("frontend read endpoints", async () => {
     expect(inverted.statusCode).toBe(400);
   });
 
-  it("lists active team members with id and email only", async () => {
+  it("lists active team members with their role, without Supabase identity data", async () => {
     const app = await createApp();
     const admin = await seedUser(db);
     await seedUser(db, { email: "inactivo@estudioszlit.com.ar", activo: false });
 
     const res = await app.inject({ method: "GET", url: "/api/equipo", headers: { authorization: admin.authHeader } });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual([{ id: admin.id, email: admin.email }]);
+    expect(res.json()).toEqual([{ id: admin.id, email: admin.email, rol: "abogado", esTitular: true, activo: true }]);
 
     const anon = await app.inject({ method: "GET", url: "/api/equipo" });
     expect(anon.statusCode).toBe(401);

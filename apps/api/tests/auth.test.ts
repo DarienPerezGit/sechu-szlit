@@ -96,8 +96,9 @@ describe("authentication API (post-cutover Bearer-only)", async () => {
     const [user] = await db.select().from(usuarios).where(eq(usuarios.email, email)).limit(1);
 
     await db.delete(usuariosRoles).where(eq(usuariosRoles.usuarioId, user.id));
-    const [lecturaRole] = await db.select().from(roles).where(eq(roles.codigo, "lectura")).limit(1);
-    await db.insert(usuariosRoles).values({ usuarioId: user.id, rolId: lecturaRole.id });
+    const [asistenteRole] = await db.select().from(roles).where(eq(roles.codigo, "asistente")).limit(1);
+    await db.update(usuarios).set({ esTitular: false }).where(eq(usuarios.id, user.id));
+    await db.insert(usuariosRoles).values({ usuarioId: user.id, rolId: asistenteRole.id });
 
     const meResponse = await app.inject({
       method: "GET",
@@ -108,7 +109,9 @@ describe("authentication API (post-cutover Bearer-only)", async () => {
     });
 
     expect(meResponse.statusCode).toBe(200);
-    expect(meResponse.json().user.role).toBe("lectura");
-    expect(meResponse.json().user.roles).toEqual(["lectura"]);
+    expect(meResponse.json().user.role).toBe("asistente");
+    expect(meResponse.json().user.roles).toEqual(["asistente"]);
+    expect(meResponse.json().user.perfil).toBe("asistente");
+    expect(meResponse.json().user.esTitular).toBe(false);
   });
 });

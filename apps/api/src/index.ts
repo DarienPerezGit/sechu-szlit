@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createDatabase } from "@sechub/db";
 import { buildApp } from "./app.js";
 import { createSupabaseClient } from "./utils/auth.js";
+import { createSupabaseAuthAdmin } from "./utils/auth-admin.js";
 
 export { buildApp, type AppDependencies } from "./app.js";
 export { createSupabaseClient } from "./utils/auth.js";
@@ -32,6 +33,7 @@ export async function createServer(
     db,
     environment: serverEnvironment,
     supabase,
+    authAdmin: createSupabaseAuthAdmin(supabaseUrl, process.env.SUPABASE_SECRET_KEY),
   });
 }
 

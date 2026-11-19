@@ -8,11 +8,17 @@ import {
   tiposAudiencia,
   bitacoraCarpetas,
 } from "@sechub/db";
-import { getAuthenticatedUser, UUID_REGEX } from "../utils/auth.js";
+import { UUID_REGEX } from "../utils/auth.js";
 import {
-  canWriteSector,
-  getWriteAuthorization,
-  requireWriteAuthorization,
+  audienciasSinCarpetaVisibles,
+  audienciasVisibles,
+  esAbogadoActivo,
+  getAccess,
+  puedeAgendarPara,
+  puedeEditarAudiencia,
+  puedeReasignarAudiencia,
+  puedeTrabajarEnCarpeta,
+  requireAccess,
   sendForbidden,
 } from "../authorization.js";
 
@@ -87,9 +93,8 @@ export async function audienciasRoutes(
   const { db } = opts;
 
   // GET /api/audiencias/orphan — must be registered BEFORE :id routes
-  app.get("/audiencias/orphan", async (request, reply) => {
-    const user = await getAuthenticatedUser(request, reply, db);
-    if (!user) return;
+  app.get("/audiencias/orphan", { preValidation: requireAccess(db) }, async (request, reply) => {
+    const { user, authorization } = getAccess(request);
 
     const data = await db
       .select()
@@ -98,6 +103,7 @@ export async function audienciasRoutes(
         and(
           eq(audiencias.estudioId, user.estudioId),
           isNull(audiencias.carpetaId),
+          audienciasSinCarpetaVisibles(authorization),
         ),
       )
       .orderBy(audiencias.fecha, audiencias.hora);
@@ -107,9 +113,8 @@ export async function audienciasRoutes(
 
   // GET /api/audiencias?fecha=YYYY-MM-DD — agenda del día
   // GET /api/audiencias?desde=YYYY-MM-DD&hasta=YYYY-MM-DD — rango (calendario, máx. 62 días)
-  app.get<{ Querystring: { fecha?: string; desde?: string; hasta?: string } }>("/audiencias", async (request, reply) => {
-    const user = await getAuthenticatedUser(request, reply, db);
-    if (!user) return;
+  app.get<{ Querystring: { fecha?: string; desde?: string; hasta?: string } }>("/audiencias", { preValidation: requireAccess(db) }, async (request, reply) => {
+    const { user, authorization } = getAccess(request);
 
     const { fecha, desde, hasta } = request.query;
     const isDate = (value: string | undefined): value is string =>
@@ -145,6 +150,7 @@ export async function audienciasRoutes(
         updatedAt: audiencias.updatedAt,
         caratula: carpetas.caratula,
         expediente: carpetas.expediente,
+        carpetaAbogadoResponsableId: carpetas.abogadoResponsableId,
         abogadoEmail: usuarios.email,
         tipoNombre: tiposAudiencia.nombre,
         tipoColor: tiposAudiencia.color,
@@ -163,6 +169,7 @@ export async function audienciasRoutes(
         and(
           eq(audiencias.estudioId, user.estudioId),
           fechaFilter,
+          audienciasVisibles(authorization),
         ),
       )
       .orderBy(audiencias.fecha, audiencias.hora);
@@ -183,7 +190,7 @@ export async function audienciasRoutes(
       notasInternas?: string | null;
     };
   }>("/audiencias", {
-    preValidation: requireWriteAuthorization(db),
+    preValidation: requireAccess(db),
     schema: {
       body: {
         type: "object",
@@ -201,7 +208,7 @@ export async function audienciasRoutes(
       },
     },
   }, async (request, reply) => {
-    const { user, authorization } = getWriteAuthorization(request);
+    const { user, authorization } = getAccess(request);
 
     const {
       carpetaId,
@@ -227,6 +234,12 @@ export async function audienciasRoutes(
     // Validate abogado ownership
     const abogadoOk = await checkAbogadoOwnership(db, abogadoId, user.estudioId, reply);
     if (!abogadoOk) return;
+    if (!(await esAbogadoActivo(db, abogadoId, user.estudioId))) {
+      return reply.status(400).send({ error: "Solo un abogado activo del estudio puede asistir a una audiencia" });
+    }
+    if (!puedeAgendarPara(authorization, abogadoId)) {
+      return sendForbidden(reply);
+    }
 
     // Validate tipoAudienciaId exists
     const [tipo] = await db
@@ -239,12 +252,12 @@ export async function audienciasRoutes(
       return reply.status(400).send({ error: "El tipo de audiencia especificado no existe" });
     }
 
-    // Validate carpeta ownership and responsible-sector access if provided.
+    // Si nace vinculada, quien agenda debe poder trabajar en esa carpeta.
     if (carpetaId) {
       const carpeta = await checkCarpetaOwnership(db, carpetaId, user.estudioId, reply);
       if (!carpeta) return;
 
-      if (!canWriteSector(authorization, carpeta.sectorActualId)) {
+      if (!puedeTrabajarEnCarpeta(authorization, carpeta)) {
         return sendForbidden(reply);
       }
     }
@@ -267,12 +280,117 @@ export async function audienciasRoutes(
     return reply.status(201).send(audiencia);
   });
 
+  // PATCH /api/audiencias/:id — reprogramar, reasignar o anotar una audiencia.
+  // Cubrir a un colega que falta = reasignarle la audiencia: lo hacen el
+  // titular o procuración. El reemplazo la ve en su agenda (con número y
+  // carátula) pero no puede abrir la carpeta del colega.
+  app.patch<{
+    Params: { id: string };
+    Body: {
+      abogadoId?: string;
+      fecha?: string;
+      hora?: string;
+      notasInternas?: string | null;
+      linkReunion?: string | null;
+    };
+  }>("/audiencias/:id", {
+    preValidation: requireAccess(db),
+    schema: {
+      body: {
+        type: "object",
+        minProperties: 1,
+        additionalProperties: false,
+        properties: {
+          abogadoId: { type: "string" },
+          fecha: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+          hora: { type: "string", pattern: "^\\d{2}:\\d{2}(:\\d{2})?$" },
+          notasInternas: { type: ["string", "null"] },
+          linkReunion: { type: ["string", "null"] },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { user, authorization } = getAccess(request);
+    const { id } = request.params;
+    if (!UUID_REGEX.test(id)) {
+      return reply.status(400).send({ error: "ID de audiencia inválido" });
+    }
+
+    const [audiencia] = await db
+      .select()
+      .from(audiencias)
+      .where(and(eq(audiencias.id, id), eq(audiencias.estudioId, user.estudioId)))
+      .limit(1);
+    if (!audiencia) {
+      return reply.status(404).send({ error: "Audiencia no encontrada" });
+    }
+
+    const [carpeta] = audiencia.carpetaId
+      ? await db
+        .select()
+        .from(carpetas)
+        .where(and(eq(carpetas.id, audiencia.carpetaId), eq(carpetas.estudioId, user.estudioId)))
+        .limit(1)
+      : [];
+    if (!puedeEditarAudiencia(authorization, audiencia, carpeta ?? null)) {
+      return sendForbidden(reply);
+    }
+
+    const { abogadoId, fecha, hora, notasInternas, linkReunion } = request.body;
+    const reasigna = abogadoId !== undefined && abogadoId !== audiencia.abogadoId;
+    if (reasigna) {
+      if (!puedeReasignarAudiencia(authorization)) {
+        return sendForbidden(reply);
+      }
+      if (!UUID_REGEX.test(abogadoId) || !(await esAbogadoActivo(db, abogadoId, user.estudioId))) {
+        return reply.status(400).send({ error: "Solo un abogado activo del estudio puede asistir a una audiencia" });
+      }
+    }
+    if (audiencia.estado !== "pendiente") {
+      return reply.status(409).send({ error: "La audiencia ya se realizó y no se puede modificar" });
+    }
+
+    const cambios: Partial<typeof audiencias.$inferInsert> = { updatedAt: new Date() };
+    if (reasigna) cambios.abogadoId = abogadoId;
+    if (fecha !== undefined) cambios.fecha = fecha;
+    if (hora !== undefined) cambios.hora = hora;
+    if (notasInternas !== undefined) cambios.notasInternas = notasInternas;
+    if (linkReunion !== undefined) cambios.linkReunion = linkReunion;
+    // Fastify descarta los campos que el esquema no conoce (p. ej. `estado`):
+    // si no queda ningún cambio real, es un pedido inválido, no una edición.
+    if (Object.keys(cambios).length === 1) {
+      return reply.status(400).send({ error: "No hay cambios para aplicar a la audiencia" });
+    }
+
+    const updated = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(audiencias)
+        .set(cambios)
+        .where(and(eq(audiencias.id, id), eq(audiencias.estudioId, user.estudioId)))
+        .returning();
+
+      if (audiencia.carpetaId) {
+        await tx.insert(bitacoraCarpetas).values({
+          carpetaId: audiencia.carpetaId,
+          usuarioId: user.id,
+          accionRealizada: reasigna ? "audiencia_reasignada" : "audiencia_actualizada",
+          metadata: reasigna
+            ? { audienciaId: id, abogado_anterior: audiencia.abogadoId, abogado_nuevo: abogadoId }
+            : { audienciaId: id, campos: Object.keys(cambios).filter((k) => k !== "updatedAt") },
+        });
+      }
+      return row;
+    });
+
+    return reply.status(200).send(updated);
+  });
+
   // PATCH /api/audiencias/:id/vincular
   app.patch<{
     Params: { id: string };
     Body: { carpetaId: string };
   }>("/audiencias/:id/vincular", {
-    preValidation: requireWriteAuthorization(db),
+    preValidation: requireAccess(db),
     schema: {
       body: {
         type: "object",
@@ -283,7 +401,7 @@ export async function audienciasRoutes(
       },
     },
   }, async (request, reply) => {
-    const { user, authorization } = getWriteAuthorization(request);
+    const { user, authorization } = getAccess(request);
 
     const { id } = request.params;
     const { carpetaId } = request.body;
@@ -308,7 +426,7 @@ export async function audienciasRoutes(
       return reply.status(404).send({ error: "Audiencia no encontrada" });
     }
 
-    // Linked audiencias remain writable only by their carpeta's current sector.
+    // Una audiencia ya vinculada solo la toca quien puede trabajar en su carpeta.
     if (audiencia.carpetaId !== null) {
       const [linkedCarpeta] = await db
         .select()
@@ -320,16 +438,24 @@ export async function audienciasRoutes(
           ),
         )
         .limit(1);
-      if (!linkedCarpeta || !canWriteSector(authorization, linkedCarpeta.sectorActualId)) {
+      if (!linkedCarpeta || !puedeTrabajarEnCarpeta(authorization, linkedCarpeta)) {
         return sendForbidden(reply);
       }
 
       return reply.status(400).send({ error: "La audiencia ya está vinculada a una carpeta" });
     }
 
+    // El abogado común solo vincula las audiencias sin carpeta que tiene asignadas.
+    if (!puedeAgendarPara(authorization, audiencia.abogadoId)) {
+      return sendForbidden(reply);
+    }
+
     // Validate target carpeta ownership
     const carpeta = await checkCarpetaOwnership(db, carpetaId, user.estudioId, reply);
     if (!carpeta) return;
+    if (!puedeTrabajarEnCarpeta(authorization, carpeta)) {
+      return sendForbidden(reply);
+    }
 
     // Link in a transaction with bitacora
     try {

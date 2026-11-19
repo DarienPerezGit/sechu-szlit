@@ -10,6 +10,7 @@ import { catalogosRoutes } from "./routes/catalogos.js";
 import { carpetasRoutes } from "./routes/carpetas.js";
 import { audienciasRoutes } from "./routes/audiencias.js";
 import { equipoRoutes } from "./routes/equipo.js";
+import type { AuthAdmin } from "./utils/auth-admin.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -23,6 +24,8 @@ export interface AppDependencies {
   webRoot?: string;
   /** Supabase client for Bearer token validation. */
   supabase?: SupabaseClient | null;
+  /** Alta de cuentas (Supabase Auth con clave secreta). Sin él, el alta responde 503. */
+  authAdmin?: AuthAdmin | null;
 }
 
 export async function buildApp(deps: AppDependencies) {
@@ -78,6 +81,7 @@ export async function buildApp(deps: AppDependencies) {
   app.register(equipoRoutes, {
     prefix: "/api",
     db: deps.db,
+    authAdmin: deps.authAdmin ?? null,
   });
 
   return app;

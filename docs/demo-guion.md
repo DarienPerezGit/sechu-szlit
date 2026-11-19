@@ -3,7 +3,7 @@
 **Antes de empezar**
 - Correr `pnpm seed:demo` contra el entorno de la demo, aunque sea el día anterior. Las fechas son relativas a hoy, así que el calendario siempre muestra audiencias próximas.
 - Entrar una vez a la app antes de presentar. El plan Free de Supabase pausa el proyecto después de 7 días sin actividad.
-- Usuario: `admin@sechub.test`.
+- Usuario: `admin@sechub.test` (titular). Para la parte de perfiles: `abogado1@sechub.test` y `asistente@sechub.test`.
 - Plan B si falla la red: contingencia local (`docs/deployment-vercel.md` §6).
 
 ## 1. El problema (30 s)
@@ -29,9 +29,15 @@
    - la versión incrementada
 5. Remarcar que todo pasa en **una sola transacción**: si dos personas vinculan a la vez, una recibe "la carpeta cambió, recargá" y no se pisan.
 
-## 5. Bajo el capó (30 s, si preguntan)
+## 5. Perfiles (1 min): cada uno ve lo suyo
+- Mostrar el badge del usuario: **Titular**. El titular es un abogado con permiso extra, no un rol aparte.
+- Entrar como `abogado1@sechub.test`: solo aparecen **sus** carpetas (Fernández, Rodríguez, Benítez, Castro) y su agenda.
+- Entrar como `asistente@sechub.test`: ve todo el estudio y puede vincular actas, pero **no tiene "Nueva carpeta"** y el estado y el sector aparecen bloqueados. La procuración no conduce el caso.
+- Remarcar que la regla vive en la API (`authorization.ts`) y la pantalla solo la refleja: si alguien fuerza el pedido, recibe 403.
+
+## 6. Bajo el capó (30 s, si preguntan)
 - Monolito Fastify + React en un solo dominio, sin CORS. Postgres en Supabase y autenticación con Supabase Auth (Bearer).
-- Modelo listo para varios estudios (`estudio_id` en todas las tablas), permisos por rol y sector, bloqueo optimista con `version`.
+- Modelo listo para varios estudios (`estudio_id` en todas las tablas), permisos por abogado responsable (titular, abogado, asistente), bloqueo optimista con `version`.
 - Migraciones versionadas, tests de API contra Postgres real, runbooks de backup y recuperación.
 
 ## Lo que viene

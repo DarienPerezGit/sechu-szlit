@@ -35,6 +35,7 @@ describe("carpetas and bitacora schema", () => {
         expediente: uniqueExpediente,
         caratula: "Pérez c/ Empresa",
         demandada: "Empresa S.A.",
+        abogadoResponsableId: usuario.id,
       }).returning();
 
       const [bitacora] = await tx.insert(bitacoraCarpetas).values({
@@ -64,6 +65,11 @@ describe("carpetas and bitacora schema", () => {
     const [sector] = await db.select().from(sectores).limit(1);
     const [estado] = await db.select().from(estadosCaso).limit(1);
 
+    const [usuario] = await db.insert(usuarios).values({
+      email: `test-optimistic-${Date.now()}@test.com`,
+      estudioId: estudio.id,
+    }).returning();
+
     const uniqueExpediente = `EXP-OPT-${Date.now()}`;
     const [carpeta] = await db.insert(carpetas).values({
       estudioId: estudio.id,
@@ -72,6 +78,7 @@ describe("carpetas and bitacora schema", () => {
       expediente: uniqueExpediente,
       caratula: "González c/ Todo",
       demandada: "Todo S.R.L.",
+      abogadoResponsableId: usuario.id,
     }).returning();
 
     expect(carpeta.version).toBe(1);

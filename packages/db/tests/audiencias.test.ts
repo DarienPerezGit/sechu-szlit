@@ -54,6 +54,7 @@ describe("audiencias schema", () => {
         expediente: uniqueExpediente,
         caratula: "Caso con audiencia",
         demandada: "Demandada S.A.",
+        abogadoResponsableId: abogado.id,
       })
       .returning();
 
@@ -253,6 +254,7 @@ describe("audiencias schema", () => {
         expediente: uniqueExpediente,
         caratula: "Caso para vincular",
         demandada: "Demandada Link S.A.",
+        abogadoResponsableId: abogado.id,
       })
       .returning();
 

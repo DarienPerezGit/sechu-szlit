@@ -1,567 +1,276 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
-  sectores,
-  empleadores,
+  bitacoraCarpetas,
+  carpetas,
+  estadosActa,
   estadosCaso,
-  estudios,
-  tiposAudiencia,
+  sectores,
+  tiposActa,
   usuarios,
-  usuariosRoles,
-  usuariosSectores,
-  roles,
-  audiencias,
 } from "../../../packages/db/src/index.js";
 import { buildApp } from "../src/app.js";
 import { createTestDatabase, createTestSupabaseClient, resetDatabase, seedUser } from "./helpers/db.js";
 
-describe("permisos por rol y sector API", async () => {
+/**
+ * Matriz de permisos por perfil:
+ *   - Titular (abogado + es_titular): ve y modifica todo, administra el equipo.
+ *   - Abogado: solo sus carpetas y su agenda.
+ *   - Asistente: ve todo, agenda y vincula actas; no abre ni edita carpetas.
+ */
+describe("permisos por perfil (titular, abogado, asistente)", async () => {
   const db = await createTestDatabase();
 
   beforeEach(async () => {
     await resetDatabase(db);
   });
 
-  async function createApp() {
-    return buildApp({
-      db,
-      environment: "test",
-      supabase: createTestSupabaseClient(),
-    });
-  }
+  async function escenario() {
+    const app = await buildApp({ db, environment: "test", supabase: createTestSupabaseClient() });
+    const stamp = Date.now();
+    const titular = await seedUser(db, { email: `titular-${stamp}@test.com` });
+    const abogado = await seedUser(db, { email: `abogado-${stamp}@test.com`, role: "abogado", esTitular: false });
+    const otroAbogado = await seedUser(db, { email: `otro-abogado-${stamp}@test.com`, role: "abogado", esTitular: false });
+    const asistente = await seedUser(db, { email: `asistente-${stamp}@test.com`, role: "asistente" });
 
-  async function loginUser(_app: any, userCredentials: { authHeader: string }) { return userCredentials.authHeader; }
-
-  async function assignSector(email: string, sectorId: number) {
-    const [user] = await db.select().from(usuarios).where(eq(usuarios.email, email)).limit(1);
-    await db.insert(usuariosSectores).values({ usuarioId: user.id, sectorId });
-    return user;
-  }
-
-  it("uses the current normalized role assignment on the next protected request", async () => {
-    const app = await createApp();
-    const credentials = await seedUser(db, {
-      email: `role-change-${Date.now()}@test.com`,
-      role: "lectura",
-    });
-    const cookie = await loginUser(app, credentials);
     const [sector] = await db.select().from(sectores).limit(1);
-    const [estado] = await db.select().from(estadosCaso).limit(1);
-    const [user] = await db.select().from(usuarios).where(eq(usuarios.email, credentials.email)).limit(1);
-    const [adminRole] = await db.select().from(roles).where(eq(roles.codigo, "admin")).limit(1);
-    const payload = {
+    const [enTramite] = await db.select().from(estadosCaso).where(eq(estadosCaso.codigo, "en_tramite"));
+
+    const send = (
+      who: { authHeader: string },
+      method: "GET" | "POST" | "PATCH",
+      url: string,
+      payload?: object,
+    ) => app.inject({ method, url, headers: { authorization: who.authHeader }, payload });
+
+    let seq = 0;
+    const carpetaPayload = (extra: object = {}) => ({
       sectorActualId: sector.id,
-      estadoCasoId: estado.id,
-      expediente: `ROLE-CHANGE-${Date.now()}`,
-      caratula: "Carpeta con rol actualizado",
-      demandada: "Demandada",
+      estadoCasoId: enTramite.id,
+      expediente: `PERFIL-${stamp}-${seq++}`,
+      caratula: "Pérez c/ Empresa",
+      demandada: "Empresa S.A.",
+      ...extra,
+    });
+
+    const crearCarpeta = async (responsableId: string) => {
+      const res = await send(titular, "POST", "/api/carpetas", carpetaPayload({ abogadoResponsableId: responsableId }));
+      expect(res.statusCode).toBe(201);
+      return res.json();
     };
 
-    const lecturaResponse = await app.inject({
-      method: "POST",
-      url: "/api/carpetas",
-      headers: { authorization: cookie },
-      payload,
-    });
-    expect(lecturaResponse.statusCode).toBe(403);
+    const propia = await crearCarpeta(abogado.id);
+    const ajena = await crearCarpeta(otroAbogado.id);
 
-    await db.delete(usuariosRoles).where(eq(usuariosRoles.usuarioId, user.id));
-    await db.insert(usuariosRoles).values({ usuarioId: user.id, rolId: adminRole.id });
+    return { app, titular, abogado, otroAbogado, asistente, sector, enTramite, send, carpetaPayload, propia, ajena };
+  }
 
-    const adminResponse = await app.inject({
-      method: "POST",
-      url: "/api/carpetas",
-      headers: { authorization: cookie },
-      payload,
-    });
-    expect(adminResponse.statusCode).toBe(201);
+  it("un abogado común solo ve sus carpetas; el titular y el asistente ven todas", async () => {
+    const { titular, abogado, asistente, send, propia, ajena } = await escenario();
+
+    const ids = async (who: { authHeader: string }) =>
+      (await send(who, "GET", "/api/carpetas")).json().map((c: { id: string }) => c.id).sort();
+
+    expect(await ids(abogado)).toEqual([propia.id]);
+    expect(await ids(titular)).toEqual([propia.id, ajena.id].sort());
+    expect(await ids(asistente)).toEqual([propia.id, ajena.id].sort());
+
+    expect((await send(abogado, "GET", `/api/carpetas/${propia.id}`)).statusCode).toBe(200);
+    expect((await send(abogado, "GET", `/api/carpetas/${ajena.id}`)).statusCode).toBe(403);
+    expect((await send(abogado, "GET", `/api/carpetas/${ajena.id}/bitacora`)).statusCode).toBe(403);
+    expect((await send(abogado, "GET", `/api/carpetas/${ajena.id}/audiencias`)).statusCode).toBe(403);
+    expect((await send(asistente, "GET", `/api/carpetas/${ajena.id}/bitacora`)).statusCode).toBe(200);
   });
 
-  it("denies protected writes after the normalized role changes to lectura", async () => {
-    const app = await createApp();
-    const credentials = await seedUser(db, {
-      email: `normalized-role-${Date.now()}@test.com`,
-      role: "admin",
-    });
-    const cookie = await loginUser(app, credentials);
-    const [sector] = await db.select().from(sectores).limit(1);
-    const [estado] = await db.select().from(estadosCaso).limit(1);
-    const [user] = await db.select().from(usuarios).where(eq(usuarios.email, credentials.email)).limit(1);
+  it("aplica los chequeos en orden: 401, rol 403, cuerpo 400, existencia 404, recurso 403", async () => {
+    const { app, abogado, asistente, send, ajena } = await escenario();
+    const sinRol = await seedUser(db, { email: `sin-rol-${Date.now()}@test.com`, role: null });
 
-    const [lecturaRole] = await db.select().from(roles).where(eq(roles.codigo, "lectura")).limit(1);
-    await db.delete(usuariosRoles).where(eq(usuariosRoles.usuarioId, user.id));
-    await db.insert(usuariosRoles).values({ usuarioId: user.id, rolId: lecturaRole.id });
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/carpetas",
-      headers: { authorization: cookie },
-      payload: {
-        sectorActualId: sector.id,
-        estadoCasoId: estado.id,
-        expediente: `NORMALIZED-ROLE-${Date.now()}`,
-        caratula: "Carpeta sin autorización",
-        demandada: "Demandada",
-      },
-    });
-    expect(response.statusCode).toBe(403);
+    expect((await app.inject({ method: "GET", url: "/api/carpetas" })).statusCode).toBe(401);
+    expect((await send(sinRol, "GET", "/api/carpetas")).statusCode).toBe(403);
+    // El asistente no abre carpetas: 403 por rol antes de validar el cuerpo.
+    expect((await send(asistente, "POST", "/api/carpetas", {})).statusCode).toBe(403);
+    expect((await send(abogado, "POST", "/api/carpetas", {})).statusCode).toBe(400);
+    expect((await send(abogado, "PATCH", "/api/carpetas/00000000-0000-7000-8000-000000000000", { version: 1 })).statusCode).toBe(404);
+    expect((await send(abogado, "PATCH", `/api/carpetas/${ajena.id}`, { version: 1 })).statusCode).toBe(403);
   });
 
-  it("allows admins to create carpetas and denies lectura writes", async () => {
-    const app = await createApp();
-    const adminCredentials = await seedUser(db, { email: "admin-permisos@test.com" });
-    const lecturaCredentials = await seedUser(db, { email: "lectura-permisos@test.com", role: "lectura" });
-    const adminCookie = await loginUser(app, adminCredentials);
-    const lecturaCookie = await loginUser(app, lecturaCredentials);
-    const [sector] = await db.select().from(sectores).limit(1);
-    const [estado] = await db.select().from(estadosCaso).limit(1);
-    const payload = {
-      sectorActualId: sector.id,
-      estadoCasoId: estado.id,
-      expediente: `PERMISOS-${Date.now()}`,
-      caratula: "Carpeta autorizada",
-      demandada: "Demandada",
+  it("solo los abogados abren carpetas y quien la abre queda como responsable", async () => {
+    const { titular, abogado, otroAbogado, asistente, send, carpetaPayload } = await escenario();
+
+    const propia = await send(abogado, "POST", "/api/carpetas", carpetaPayload());
+    expect(propia.statusCode).toBe(201);
+    expect(propia.json().abogadoResponsableId).toBe(abogado.id);
+
+    expect((await send(asistente, "POST", "/api/carpetas", carpetaPayload())).statusCode).toBe(403);
+    expect((await send(abogado, "POST", "/api/carpetas", carpetaPayload({ abogadoResponsableId: otroAbogado.id }))).statusCode).toBe(403);
+    expect((await send(titular, "POST", "/api/carpetas", carpetaPayload({ abogadoResponsableId: asistente.id }))).statusCode).toBe(400);
+
+    const asignada = await send(titular, "POST", "/api/carpetas", carpetaPayload({ abogadoResponsableId: otroAbogado.id }));
+    expect(asignada.statusCode).toBe(201);
+    expect(asignada.json().abogadoResponsableId).toBe(otroAbogado.id);
+  });
+
+  it("la carpeta la modifican el titular y su abogado responsable, no el asistente ni otro abogado", async () => {
+    const { titular, abogado, otroAbogado, asistente, send, propia } = await escenario();
+    const [otroSector] = await db.select().from(sectores).where(eq(sectores.codigo, "procesal"));
+
+    const delResponsable = await send(abogado, "PATCH", `/api/carpetas/${propia.id}`, {
+      version: propia.version,
+      sectorActualId: otroSector.id,
+    });
+    expect(delResponsable.statusCode).toBe(200);
+    expect(delResponsable.json().sectorActualId).toBe(otroSector.id);
+
+    const version = delResponsable.json().version;
+    expect((await send(otroAbogado, "PATCH", `/api/carpetas/${propia.id}`, { version, caratula: "x" })).statusCode).toBe(403);
+    expect((await send(asistente, "PATCH", `/api/carpetas/${propia.id}`, { version, caratula: "x" })).statusCode).toBe(403);
+
+    const delTitular = await send(titular, "PATCH", `/api/carpetas/${propia.id}`, { version, caratula: "Pérez c/ Empresa S.A." });
+    expect(delTitular.statusCode).toBe(200);
+    expect(delTitular.json().version).toBe(version + 1);
+  });
+
+  it("solo el titular reasigna una carpeta a otro abogado", async () => {
+    const { titular, abogado, otroAbogado, send, propia } = await escenario();
+
+    const intento = await send(abogado, "PATCH", `/api/carpetas/${propia.id}`, {
+      version: propia.version,
+      abogadoResponsableId: otroAbogado.id,
+    });
+    expect(intento.statusCode).toBe(403);
+
+    const reasignada = await send(titular, "PATCH", `/api/carpetas/${propia.id}`, {
+      version: propia.version,
+      abogadoResponsableId: otroAbogado.id,
+    });
+    expect(reasignada.statusCode).toBe(200);
+    expect(reasignada.json().abogadoResponsableId).toBe(otroAbogado.id);
+
+    // El abogado anterior deja de verla en el siguiente pedido.
+    expect((await send(abogado, "GET", `/api/carpetas/${propia.id}`)).statusCode).toBe(403);
+    expect((await send(otroAbogado, "GET", `/api/carpetas/${propia.id}`)).statusCode).toBe(200);
+  });
+
+  it("la agenda del abogado común muestra sus audiencias y las de sus carpetas", async () => {
+    const { titular, abogado, otroAbogado, asistente, send, propia, ajena } = await escenario();
+    const fecha = "2026-12-01";
+    const agendar = async (carpetaId: string | null, abogadoId: string, hora: string) => {
+      const res = await send(titular, "POST", "/api/audiencias", { carpetaId, abogadoId, fecha, hora, tipoAudienciaId: 1 });
+      expect(res.statusCode).toBe(201);
+      return res.json().id as string;
     };
 
-    const adminResponse = await app.inject({
-      method: "POST",
-      url: "/api/carpetas",
-      headers: { authorization: adminCookie },
-      payload,
-    });
-    expect(adminResponse.statusCode).toBe(201);
+    const enSuCarpeta = await agendar(propia.id, titular.id, "09:00");
+    const enCarpetaAjena = await agendar(ajena.id, otroAbogado.id, "10:00");
+    const sinCarpetaDelOtro = await agendar(null, otroAbogado.id, "11:00");
 
-    const lecturaResponse = await app.inject({
-      method: "POST",
-      url: "/api/carpetas",
-      headers: { authorization: lecturaCookie },
-      payload: { ...payload, expediente: `${payload.expediente}-lectura` },
-    });
-    expect(lecturaResponse.statusCode).toBe(403);
+    const agenda = async (who: { authHeader: string }) =>
+      (await send(who, "GET", `/api/audiencias?fecha=${fecha}`)).json().map((a: { id: string }) => a.id).sort();
+    const sinCarpeta = async (who: { authHeader: string }) =>
+      (await send(who, "GET", "/api/audiencias/orphan")).json().map((a: { id: string }) => a.id);
+
+    expect(await agenda(abogado)).toEqual([enSuCarpeta]);
+    expect(await agenda(otroAbogado)).toEqual([enCarpetaAjena, sinCarpetaDelOtro].sort());
+    expect(await agenda(asistente)).toEqual([enSuCarpeta, enCarpetaAjena, sinCarpetaDelOtro].sort());
+    expect(await sinCarpeta(abogado)).toEqual([]);
+    expect(await sinCarpeta(otroAbogado)).toEqual([sinCarpetaDelOtro]);
+    expect(await sinCarpeta(asistente)).toEqual([sinCarpetaDelOtro]);
   });
 
-  it("authorizes writes before validation and gives admins full write access", async () => {
-    const app = await createApp();
-    const adminCredentials = await seedUser(db, { email: "admin-write-middleware@test.com" });
-    const lecturaCredentials = await seedUser(db, {
-      email: "lectura-write-middleware@test.com",
-      role: "lectura",
+  it("el abogado común agenda solo para sí y en sus carpetas; el asistente agenda en cualquiera", async () => {
+    const { abogado, otroAbogado, asistente, send, propia, ajena } = await escenario();
+    const audiencia = (carpetaId: string | null, abogadoId: string) => ({
+      carpetaId, abogadoId, fecha: "2026-12-02", hora: "09:00", tipoAudienciaId: 1,
     });
-    const adminCookie = await loginUser(app, adminCredentials);
-    const lecturaCookie = await loginUser(app, lecturaCredentials);
-    const [admin] = await db.select().from(usuarios).where(eq(usuarios.email, adminCredentials.email)).limit(1);
-    const [sector] = await db.select().from(sectores).limit(1);
-    const [estado] = await db.select().from(estadosCaso).limit(1);
-    const [tipo] = await db.select().from(tiposAudiencia).limit(1);
 
-    const carpetaResponse = await app.inject({
-      method: "POST",
-      url: "/api/carpetas",
-      headers: { authorization: adminCookie },
-      payload: {
-        sectorActualId: sector.id,
-        estadoCasoId: estado.id,
-        expediente: `ADMIN-PATCH-${Date.now()}`,
-        caratula: "Carpeta de administrador",
-        demandada: "Demandada",
-      },
-    });
-    expect(carpetaResponse.statusCode).toBe(201);
-    const carpeta = carpetaResponse.json();
-
-    const lecturaResponse = await app.inject({
-      method: "PATCH",
-      url: "/api/carpetas/not-a-uuid",
-      headers: { authorization: lecturaCookie },
-      payload: { version: 1 },
-    });
-    expect(lecturaResponse.statusCode).toBe(403);
-
-    const patchResponse = await app.inject({
-      method: "PATCH",
-      url: `/api/carpetas/${carpeta.id}`,
-      headers: { authorization: adminCookie },
-      payload: { version: carpeta.version, caratula: "Carpeta actualizada" },
-    });
-    expect(patchResponse.statusCode).toBe(200);
-
-    const orphanResponse = await app.inject({
-      method: "POST",
-      url: "/api/audiencias",
-      headers: { authorization: adminCookie },
-      payload: {
-        abogadoId: admin.id,
-        fecha: "2026-10-12",
-        hora: "10:00",
-        tipoAudienciaId: tipo.id,
-      },
-    });
-    expect(orphanResponse.statusCode).toBe(201);
-
-    const linkResponse = await app.inject({
-      method: "PATCH",
-      url: `/api/audiencias/${orphanResponse.json().id}/vincular`,
-      headers: { authorization: adminCookie },
-      payload: { carpetaId: carpeta.id },
-    });
-    expect(linkResponse.statusCode).toBe(200);
+    expect((await send(abogado, "POST", "/api/audiencias", audiencia(null, otroAbogado.id))).statusCode).toBe(403);
+    expect((await send(abogado, "POST", "/api/audiencias", audiencia(ajena.id, abogado.id))).statusCode).toBe(403);
+    expect((await send(abogado, "POST", "/api/audiencias", audiencia(propia.id, abogado.id))).statusCode).toBe(201);
+    expect((await send(asistente, "POST", "/api/audiencias", audiencia(ajena.id, otroAbogado.id))).statusCode).toBe(201);
   });
 
-  it("limits responsables to the current carpeta sector while allowing orphan audiencias", async () => {
-    const app = await createApp();
-    const adminCredentials = await seedUser(db, { email: "admin-sector@test.com" });
-    const managerCredentials = await seedUser(db, {
-      email: "responsable-sector@test.com",
-      role: "responsable_sector",
-    });
-    const adminCookie = await loginUser(app, adminCredentials);
-    const managerCookie = await loginUser(app, managerCredentials);
-    const [admin] = await db.select().from(usuarios).where(eq(usuarios.email, adminCredentials.email)).limit(1);
-    const [ownSector, otherSector] = await db.select().from(sectores).limit(2);
-    const [estado] = await db.select().from(estadosCaso).limit(1);
-    const [tipo] = await db.select().from(tiposAudiencia).limit(1);
-    await assignSector(managerCredentials.email, ownSector.id);
+  it("el asistente vincula actas en cualquier carpeta; un abogado común, solo en las suyas", async () => {
+    const { abogado, otroAbogado, asistente, send, ajena } = await escenario();
+    const [acuerdo] = await db.select().from(tiposActa).where(eq(tiposActa.codigo, "acuerdo"));
+    const [pendiente] = await db.select().from(estadosActa).where(eq(estadosActa.codigo, "pendiente"));
 
-    const managerCarpetaResponse = await app.inject({
-      method: "POST",
-      url: "/api/carpetas",
-      headers: { authorization: managerCookie },
-      payload: {
-        sectorActualId: ownSector.id,
-        estadoCasoId: estado.id,
-        expediente: `MANAGER-OWN-${Date.now()}`,
-        caratula: "Carpeta propia",
-        demandada: "Demandada",
-      },
-    });
-    expect(managerCarpetaResponse.statusCode).toBe(201);
-    const managerCarpeta = managerCarpetaResponse.json();
+    const preparar = async () => {
+      const audiencia = await send(asistente, "POST", "/api/audiencias", {
+        carpetaId: ajena.id, abogadoId: otroAbogado.id, fecha: "2026-12-03", hora: "09:00", tipoAudienciaId: 1,
+      });
+      const acta = await send(asistente, "POST", "/api/actas", { tipoActaId: acuerdo.id, estadoActaId: pendiente.id });
+      expect(audiencia.statusCode).toBe(201);
+      expect(acta.statusCode).toBe(201);
+      return { audienciaId: audiencia.json().id, actaId: acta.json().id };
+    };
 
-    const otherCarpetaResponse = await app.inject({
-      method: "POST",
-      url: "/api/carpetas",
-      headers: { authorization: adminCookie },
-      payload: {
-        sectorActualId: otherSector.id,
-        estadoCasoId: estado.id,
-        expediente: `ADMIN-OTHER-${Date.now()}`,
-        caratula: "Carpeta ajena",
-        demandada: "Demandada",
-      },
+    const primera = await preparar();
+    const denegada = await send(abogado, "PATCH", `/api/actas/${primera.actaId}/vincular`, {
+      carpetaId: ajena.id, audienciaId: primera.audienciaId,
     });
-    expect(otherCarpetaResponse.statusCode).toBe(201);
-    const otherCarpeta = otherCarpetaResponse.json();
+    expect(denegada.statusCode).toBe(403);
 
-    const createOtherResponse = await app.inject({
-      method: "POST",
-      url: "/api/carpetas",
-      headers: { authorization: managerCookie },
-      payload: {
-        sectorActualId: otherSector.id,
-        estadoCasoId: estado.id,
-        expediente: `MANAGER-OTHER-${Date.now()}`,
-        caratula: "No autorizada",
-        demandada: "Demandada",
-      },
+    const vinculada = await send(asistente, "PATCH", `/api/actas/${primera.actaId}/vincular`, {
+      carpetaId: ajena.id, audienciaId: primera.audienciaId,
     });
-    expect(createOtherResponse.statusCode).toBe(403);
+    expect(vinculada.statusCode).toBe(200);
+    const [carpeta] = await db.select().from(carpetas).where(eq(carpetas.id, ajena.id));
+    const [conciliado] = await db.select().from(estadosCaso).where(eq(estadosCaso.codigo, "conciliado"));
+    expect(carpeta.estadoCasoId).toBe(conciliado.id);
+    expect(carpeta.version).toBe(ajena.version + 1);
 
-    const transitionResponse = await app.inject({
-      method: "PATCH",
-      url: `/api/carpetas/${managerCarpeta.id}`,
-      headers: { authorization: managerCookie },
-      payload: { version: managerCarpeta.version, sectorActualId: otherSector.id },
-    });
-    expect(transitionResponse.statusCode).toBe(200);
-
-    const updateOtherResponse = await app.inject({
-      method: "PATCH",
-      url: `/api/carpetas/${otherCarpeta.id}`,
-      headers: { authorization: managerCookie },
-      payload: { version: otherCarpeta.version, caratula: "No autorizada" },
-    });
-    expect(updateOtherResponse.statusCode).toBe(403);
-
-    const linkedCreationResponse = await app.inject({
-      method: "POST",
-      url: "/api/audiencias",
-      headers: { authorization: managerCookie },
-      payload: {
-        carpetaId: otherCarpeta.id,
-        abogadoId: admin.id,
-        fecha: "2026-10-10",
-        hora: "10:00",
-        tipoAudienciaId: tipo.id,
-      },
-    });
-    expect(linkedCreationResponse.statusCode).toBe(403);
-
-    const orphanResponse = await app.inject({
-      method: "POST",
-      url: "/api/audiencias",
-      headers: { authorization: managerCookie },
-      payload: {
-        abogadoId: admin.id,
-        fecha: "2026-10-10",
-        hora: "11:00",
-        tipoAudienciaId: tipo.id,
-      },
-    });
-    expect(orphanResponse.statusCode).toBe(201);
-
-    const linkResponse = await app.inject({
-      method: "PATCH",
-      url: `/api/audiencias/${orphanResponse.json().id}/vincular`,
-      headers: { authorization: managerCookie },
-      payload: { carpetaId: otherCarpeta.id },
-    });
-    expect(linkResponse.statusCode).toBe(200);
-
-    const linkedWriteResponse = await app.inject({
-      method: "PATCH",
-      url: `/api/audiencias/${orphanResponse.json().id}/vincular`,
-      headers: { authorization: managerCookie },
-      payload: { carpetaId: otherCarpeta.id },
-    });
-    expect(linkedWriteResponse.statusCode).toBe(403);
+    // La bitácora atribuye el cambio de estado al asistente que vinculó el acta.
+    const [entrada] = await db
+      .select()
+      .from(bitacoraCarpetas)
+      .where(and(eq(bitacoraCarpetas.carpetaId, ajena.id), eq(bitacoraCarpetas.accionRealizada, "acta_vinculada")));
+    expect(entrada.usuarioId).toBe(asistente.id);
+    expect(entrada.metadata).toMatchObject({ estado_anterior: "en_tramite", estado_nuevo: "conciliado" });
   });
 
-  it("returns 403 before validating empleador ownership for unauthorized carpeta updates", async () => {
-    const app = await createApp();
-    const adminCredentials = await seedUser(db, { email: "admin-patch-ownership@test.com" });
-    const lecturaCredentials = await seedUser(db, {
-      email: "lectura-patch-ownership@test.com",
-      role: "lectura",
-    });
-    const managerCredentials = await seedUser(db, {
-      email: "responsable-patch-ownership@test.com",
-      role: "responsable_sector",
-    });
-    const adminCookie = await loginUser(app, adminCredentials);
-    const lecturaCookie = await loginUser(app, lecturaCredentials);
-    const managerCookie = await loginUser(app, managerCredentials);
-    const [ownSector, otherSector] = await db.select().from(sectores).limit(2);
-    const [estado] = await db.select().from(estadosCaso).limit(1);
-    await assignSector(managerCredentials.email, ownSector.id);
+  it("un cambio de rol o de titularidad aplica en el siguiente pedido", async () => {
+    const { abogado, send, ajena } = await escenario();
 
-    const carpetaResponse = await app.inject({
-      method: "POST",
-      url: "/api/carpetas",
-      headers: { authorization: adminCookie },
-      payload: {
-        sectorActualId: otherSector.id,
-        estadoCasoId: estado.id,
-        expediente: `PATCH-OWNERSHIP-${Date.now()}`,
-        caratula: "Carpeta restringida",
-        demandada: "Demandada",
-      },
-    });
-    expect(carpetaResponse.statusCode).toBe(201);
-    const carpeta = carpetaResponse.json();
-    const [foreignEstudio] = await db.insert(estudios).values({
-      nombre: `Estudio ajeno ${Date.now()}`,
-    }).returning();
-    const [foreignEmpleador] = await db.insert(empleadores).values({
-      estudioId: foreignEstudio.id,
-      razonSocial: "Empleador ajeno",
-    }).returning();
-
-    const lecturaResponse = await app.inject({
-      method: "PATCH",
-      url: `/api/carpetas/${carpeta.id}`,
-      headers: { authorization: lecturaCookie },
-      payload: { version: carpeta.version, empleadorId: "invalid-empleador-id" },
-    });
-    expect(lecturaResponse.statusCode).toBe(403);
-
-    const managerResponse = await app.inject({
-      method: "PATCH",
-      url: `/api/carpetas/${carpeta.id}`,
-      headers: { authorization: managerCookie },
-      payload: {
-        version: carpeta.version,
-        empleadorId: foreignEmpleador.id,
-      },
-    });
-    expect(managerResponse.statusCode).toBe(403);
+    expect((await send(abogado, "GET", `/api/carpetas/${ajena.id}`)).statusCode).toBe(403);
+    await db.update(usuarios).set({ esTitular: true }).where(eq(usuarios.id, abogado.id));
+    expect((await send(abogado, "GET", `/api/carpetas/${ajena.id}`)).statusCode).toBe(200);
+    await db.update(usuarios).set({ activo: false }).where(eq(usuarios.id, abogado.id));
+    expect((await send(abogado, "GET", `/api/carpetas/${ajena.id}`)).statusCode).toBe(403);
   });
 
-  it("allows admins to create audiencias linked to an owned carpeta", async () => {
-    const app = await createApp();
-    const adminCredentials = await seedUser(db, { email: "admin-linked-audiencia@test.com" });
-    const adminCookie = await loginUser(app, adminCredentials);
-    const [admin] = await db.select().from(usuarios).where(eq(usuarios.email, adminCredentials.email)).limit(1);
-    const [sector] = await db.select().from(sectores).limit(1);
-    const [estado] = await db.select().from(estadosCaso).limit(1);
-    const [tipo] = await db.select().from(tiposAudiencia).limit(1);
+  it("solo el titular administra el equipo y el estudio nunca queda sin titular", async () => {
+    const { titular, abogado, asistente, send } = await escenario();
 
-    const carpetaResponse = await app.inject({
-      method: "POST",
-      url: "/api/carpetas",
-      headers: { authorization: adminCookie },
-      payload: {
-        sectorActualId: sector.id,
-        estadoCasoId: estado.id,
-        expediente: `ADMIN-LINKED-AUD-${Date.now()}`,
-        caratula: "Carpeta para audiencia",
-        demandada: "Demandada",
-      },
-    });
-    expect(carpetaResponse.statusCode).toBe(201);
-    const carpeta = carpetaResponse.json();
+    const equipo = (await send(asistente, "GET", "/api/equipo")).json();
+    expect(equipo.find((m: { id: string }) => m.id === titular.id)).toMatchObject({ rol: "abogado", esTitular: true });
+    expect(equipo.find((m: { id: string }) => m.id === asistente.id)).toMatchObject({ rol: "asistente", esTitular: false });
 
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/audiencias",
-      headers: { authorization: adminCookie },
-      payload: {
-        carpetaId: carpeta.id,
-        abogadoId: admin.id,
-        fecha: "2026-10-13",
-        hora: "10:00",
-        tipoAudienciaId: tipo.id,
-      },
-    });
+    expect((await send(abogado, "PATCH", `/api/equipo/${asistente.id}`, { rol: "abogado" })).statusCode).toBe(403);
+    expect((await send(asistente, "PATCH", `/api/equipo/${asistente.id}`, { rol: "abogado" })).statusCode).toBe(403);
+    expect((await send(titular, "PATCH", `/api/equipo/${asistente.id}`, { esTitular: true })).statusCode).toBe(400);
+    expect((await send(titular, "PATCH", `/api/equipo/${titular.id}`, { esTitular: false })).statusCode).toBe(409);
 
-    expect(response.statusCode).toBe(201);
-    expect(response.json().carpetaId).toBe(carpeta.id);
-    const [persisted] = await db.select().from(audiencias).where(eq(audiencias.id, response.json().id)).limit(1);
-    expect(persisted.carpetaId).toBe(carpeta.id);
+    const promovido = await send(titular, "PATCH", `/api/equipo/${abogado.id}`, { esTitular: true });
+    expect(promovido.statusCode).toBe(200);
+    expect(promovido.json()).toMatchObject({ rol: "abogado", esTitular: true });
+
+    // Con dos titulares, uno puede dejar de serlo.
+    expect((await send(titular, "PATCH", `/api/equipo/${titular.id}`, { esTitular: false })).statusCode).toBe(200);
+
+    const ascendido = await send(abogado, "PATCH", `/api/equipo/${asistente.id}`, { rol: "abogado" });
+    expect(ascendido.statusCode).toBe(200);
+    expect(ascendido.json()).toMatchObject({ rol: "abogado", esTitular: false });
   });
 
-  it("allows responsables to create audiencias linked to a carpeta in an assigned sector", async () => {
-    const app = await createApp();
-    const managerCredentials = await seedUser(db, {
-      email: "responsable-linked-audiencia@test.com",
-      role: "responsable_sector",
-    });
-    const managerCookie = await loginUser(app, managerCredentials);
-    const [sector] = await db.select().from(sectores).limit(1);
-    const manager = await assignSector(managerCredentials.email, sector.id);
-    const [estado] = await db.select().from(estadosCaso).limit(1);
-    const [tipo] = await db.select().from(tiposAudiencia).limit(1);
+  it("GET /api/auth/me informa el perfil resuelto", async () => {
+    const { titular, abogado, asistente, send } = await escenario();
+    const sinRol = await seedUser(db, { email: `me-sin-rol-${Date.now()}@test.com`, role: null });
 
-    const carpetaResponse = await app.inject({
-      method: "POST",
-      url: "/api/carpetas",
-      headers: { authorization: managerCookie },
-      payload: {
-        sectorActualId: sector.id,
-        estadoCasoId: estado.id,
-        expediente: `MANAGER-LINKED-AUD-${Date.now()}`,
-        caratula: "Carpeta para audiencia responsable",
-        demandada: "Demandada",
-      },
-    });
-    expect(carpetaResponse.statusCode).toBe(201);
-    const carpeta = carpetaResponse.json();
-
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/audiencias",
-      headers: { authorization: managerCookie },
-      payload: {
-        carpetaId: carpeta.id,
-        abogadoId: manager.id,
-        fecha: "2026-10-14",
-        hora: "10:00",
-        tipoAudienciaId: tipo.id,
-      },
-    });
-
-    expect(response.statusCode).toBe(201);
-    expect(response.json().carpetaId).toBe(carpeta.id);
-    const [persisted] = await db.select().from(audiencias).where(eq(audiencias.id, response.json().id)).limit(1);
-    expect(persisted.carpetaId).toBe(carpeta.id);
-  });
-
-  it("keeps reads available while blocking lectura from orphan and linked audiencia writes", async () => {
-    const app = await createApp();
-    const adminCredentials = await seedUser(db, { email: "admin-audiencias@test.com" });
-    const lecturaCredentials = await seedUser(db, {
-      email: "lectura-audiencias@test.com",
-      role: "lectura",
-    });
-    const adminCookie = await loginUser(app, adminCredentials);
-    const lecturaCookie = await loginUser(app, lecturaCredentials);
-    const [admin] = await db.select().from(usuarios).where(eq(usuarios.email, adminCredentials.email)).limit(1);
-    const [sector] = await db.select().from(sectores).limit(1);
-    const [estado] = await db.select().from(estadosCaso).limit(1);
-    const [tipo] = await db.select().from(tiposAudiencia).limit(1);
-
-    const carpetaResponse = await app.inject({
-      method: "POST",
-      url: "/api/carpetas",
-      headers: { authorization: adminCookie },
-      payload: {
-        sectorActualId: sector.id,
-        estadoCasoId: estado.id,
-        expediente: `LECTURA-AUD-${Date.now()}`,
-        caratula: "Carpeta de lectura",
-        demandada: "Demandada",
-      },
-    });
-    const carpeta = carpetaResponse.json();
-
-    const orphanResponse = await app.inject({
-      method: "POST",
-      url: "/api/audiencias",
-      headers: { authorization: adminCookie },
-      payload: {
-        abogadoId: admin.id,
-        fecha: "2026-10-11",
-        hora: "10:00",
-        tipoAudienciaId: tipo.id,
-      },
-    });
-    expect(orphanResponse.statusCode).toBe(201);
-
-    const carpetasReadResponse = await app.inject({
-      method: "GET",
-      url: "/api/carpetas",
-      headers: { authorization: lecturaCookie },
-    });
-    expect(carpetasReadResponse.statusCode).toBe(200);
-    const agendaReadResponse = await app.inject({
-      method: "GET",
-      url: "/api/audiencias?fecha=2026-10-11",
-      headers: { authorization: lecturaCookie },
-    });
-    expect(agendaReadResponse.statusCode).toBe(200);
-
-    const orphanWriteResponse = await app.inject({
-      method: "POST",
-      url: "/api/audiencias",
-      headers: { authorization: lecturaCookie },
-      payload: {
-        abogadoId: admin.id,
-        fecha: "2026-10-11",
-        hora: "11:00",
-        tipoAudienciaId: tipo.id,
-      },
-    });
-    expect(orphanWriteResponse.statusCode).toBe(403);
-
-    const linkedWriteResponse = await app.inject({
-      method: "POST",
-      url: "/api/audiencias",
-      headers: { authorization: lecturaCookie },
-      payload: {
-        carpetaId: carpeta.id,
-        abogadoId: admin.id,
-        fecha: "2026-10-11",
-        hora: "12:00",
-        tipoAudienciaId: tipo.id,
-      },
-    });
-    expect(linkedWriteResponse.statusCode).toBe(403);
-
-    const orphanLinkResponse = await app.inject({
-      method: "PATCH",
-      url: `/api/audiencias/${orphanResponse.json().id}/vincular`,
-      headers: { authorization: lecturaCookie },
-      payload: { carpetaId: carpeta.id },
-    });
-    expect(orphanLinkResponse.statusCode).toBe(403);
+    const perfil = async (who: { authHeader: string }) => (await send(who, "GET", "/api/auth/me")).json().user.perfil;
+    expect(await perfil(titular)).toBe("titular");
+    expect(await perfil(abogado)).toBe("abogado");
+    expect(await perfil(asistente)).toBe("asistente");
+    expect(await perfil(sinRol)).toBeNull();
   });
 });

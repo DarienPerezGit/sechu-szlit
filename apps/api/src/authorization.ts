@@ -1,87 +1,220 @@
-import { sql } from "drizzle-orm";
+/**
+ * Matriz de permisos de SECHUB, en un solo lugar.
+ *
+ * Perfiles:
+ *   - Abogado:   actúa sobre las carpetas de las que es responsable y su agenda.
+ *   - Asistente: procuración. Ve todo el estudio, carga audiencias y actas y
+ *                vincula actas; no crea ni modifica carpetas.
+ *   - Titular:   no es un tercer rol, es un abogado con `es_titular`. Ve y
+ *                modifica todo el estudio y es el único que administra el equipo.
+ *
+ * Las rutas llaman a estas políticas en lugar de revisar roles por su cuenta.
+ * Casi todo sale de una regla: `actuaSoloSobreLoPropio`.
+ *
+ * Orden de los chequeos en cada ruta: autenticación (401) → rol (403) →
+ * cuerpo (400, validación de esquema) → existencia (404) → acceso a ese
+ * recurso (403).
+ */
+import { and, eq, or, type SQL } from "drizzle-orm";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { ROLE_CODES, type Database, type Usuario } from "@sechub/db";
+import {
+  audiencias,
+  carpetas,
+  ROLE_CODES,
+  roles,
+  usuarios,
+  usuariosRoles,
+  type Carpeta,
+  type Database,
+  type RoleCode,
+  type Usuario,
+} from "@sechub/db";
 import { getAuthenticatedUser } from "./utils/auth.js";
 
 export interface AuthorizationContext {
-  isAdmin: boolean;
-  isResponsableSector: boolean;
-  sectorIds: Set<number>;
+  usuarioId: string;
+  rol: RoleCode | null;
+  esTitular: boolean;
 }
 
-export interface WriteAuthorization {
+export interface Access {
   user: Usuario;
   authorization: AuthorizationContext;
 }
 
 declare module "fastify" {
   interface FastifyRequest {
-    writeAuthorization?: WriteAuthorization;
+    access?: Access;
   }
 }
 
-interface AuthorizationRow {
-  codigo: string;
-  sectorId: number | null;
-}
-
+/** Carga el rol desde la base en cada pedido: un cambio de rol aplica al instante. */
 export async function loadAuthorization(
   db: Database,
-  usuarioId: string,
+  user: Pick<Usuario, "id" | "esTitular">,
 ): Promise<AuthorizationContext> {
-  const result = await db.execute(sql<AuthorizationRow>`
-    SELECT roles.codigo, usuarios_sectores.sector_id AS "sectorId"
-    FROM usuarios_roles
-    INNER JOIN roles ON roles.id = usuarios_roles.rol_id
-    LEFT JOIN usuarios_sectores ON usuarios_sectores.usuario_id = usuarios_roles.usuario_id
-    WHERE usuarios_roles.usuario_id = ${usuarioId}
-  `);
-  const rows = result.rows as unknown as AuthorizationRow[];
+  const [assigned] = await db
+    .select({ codigo: roles.codigo })
+    .from(usuariosRoles)
+    .innerJoin(roles, eq(roles.id, usuariosRoles.rolId))
+    .where(eq(usuariosRoles.usuarioId, user.id))
+    .limit(1);
 
-  return {
-    isAdmin: rows.some((row) => row.codigo === ROLE_CODES.ADMIN),
-    isResponsableSector: rows.some((row) => row.codigo === ROLE_CODES.RESPONSABLE_SECTOR),
-    sectorIds: new Set(
-      rows.flatMap((row) => row.sectorId === null ? [] : [row.sectorId]),
-    ),
-  };
+  const rol = (Object.values(ROLE_CODES) as string[]).includes(assigned?.codigo ?? "")
+    ? (assigned!.codigo as RoleCode)
+    : null;
+
+  return { usuarioId: user.id, rol, esTitular: user.esTitular };
 }
 
-export function canWrite(context: AuthorizationContext): boolean {
-  return context.isAdmin || context.isResponsableSector;
+// ── Perfiles ────────────────────────────────────────────────────────────────
+
+export const esAbogado = (a: AuthorizationContext) => a.rol === ROLE_CODES.ABOGADO;
+export const esAsistente = (a: AuthorizationContext) => a.rol === ROLE_CODES.ASISTENTE;
+export const esTitular = (a: AuthorizationContext) => esAbogado(a) && a.esTitular;
+
+/** La regla central: un abogado que no es titular solo actúa sobre lo propio. */
+export const actuaSoloSobreLoPropio = (a: AuthorizationContext) => esAbogado(a) && !a.esTitular;
+
+export function perfil(a: AuthorizationContext): "titular" | "abogado" | "asistente" | null {
+  if (esTitular(a)) return "titular";
+  if (esAbogado(a)) return "abogado";
+  if (esAsistente(a)) return "asistente";
+  return null;
 }
 
-export function canWriteSector(
-  context: AuthorizationContext,
-  sectorId: number,
-): boolean {
-  return context.isAdmin || (
-    context.isResponsableSector && context.sectorIds.has(sectorId)
-  );
+// ── Carpetas ────────────────────────────────────────────────────────────────
+
+type CarpetaOwnership = Pick<Carpeta, "abogadoResponsableId">;
+
+const esPropia = (a: AuthorizationContext, c: CarpetaOwnership) =>
+  c.abogadoResponsableId === a.usuarioId;
+
+/** Filtro de lectura: el abogado común ve sus carpetas; los demás, todas. */
+export function carpetasVisibles(a: AuthorizationContext): SQL | undefined {
+  return actuaSoloSobreLoPropio(a) ? eq(carpetas.abogadoResponsableId, a.usuarioId) : undefined;
 }
+
+export const puedeVerCarpeta = (a: AuthorizationContext, c: CarpetaOwnership) =>
+  !actuaSoloSobreLoPropio(a) || esPropia(a, c);
+
+/** Abrir un expediente es tarea de abogados; el asistente no crea carpetas. */
+export const puedeCrearCarpeta = (a: AuthorizationContext) => esAbogado(a);
+
+/** Datos, estado y sector de la carpeta: el titular o su abogado responsable. */
+export const puedeEditarCarpeta = (a: AuthorizationContext, c: CarpetaOwnership) =>
+  esTitular(a) || (esAbogado(a) && esPropia(a, c));
+
+/** Solo el titular asigna una carpeta a otro abogado. */
+export const puedeAsignarAbogado = (a: AuthorizationContext, abogadoId: string) =>
+  esTitular(a) || (esAbogado(a) && abogadoId === a.usuarioId);
+
+/**
+ * Trabajo de procuración sobre una carpeta: agendar audiencias, cargar y
+ * vincular actas. Lo hacen el asistente, el titular y el abogado responsable.
+ */
+export const puedeTrabajarEnCarpeta = (a: AuthorizationContext, c: CarpetaOwnership) =>
+  esAsistente(a) || esTitular(a) || (esAbogado(a) && esPropia(a, c));
+
+// ── Agenda ──────────────────────────────────────────────────────────────────
+
+/**
+ * Filtro de agenda: el abogado común ve las audiencias que tiene asignadas y
+ * las de sus carpetas. Requiere la consulta unida a `carpetas`.
+ */
+export function audienciasVisibles(a: AuthorizationContext): SQL | undefined {
+  return actuaSoloSobreLoPropio(a)
+    ? or(eq(audiencias.abogadoId, a.usuarioId), eq(carpetas.abogadoResponsableId, a.usuarioId))
+    : undefined;
+}
+
+/** Audiencias sin carpeta: el abogado común ve solo las que tiene asignadas. */
+export function audienciasSinCarpetaVisibles(a: AuthorizationContext): SQL | undefined {
+  return actuaSoloSobreLoPropio(a) ? eq(audiencias.abogadoId, a.usuarioId) : undefined;
+}
+
+/** El abogado común agenda solo para sí mismo. */
+export const puedeAgendarPara = (a: AuthorizationContext, abogadoId: string) =>
+  !actuaSoloSobreLoPropio(a) || abogadoId === a.usuarioId;
+
+/**
+ * Editar una audiencia: la misma regla que la agenda, así cada uno edita
+ * exactamente lo que ve. El abogado común edita las audiencias a las que
+ * asiste y las de sus carpetas.
+ */
+export const puedeEditarAudiencia = (
+  a: AuthorizationContext,
+  audiencia: { abogadoId: string },
+  carpeta: CarpetaOwnership | null,
+) => !actuaSoloSobreLoPropio(a) || audiencia.abogadoId === a.usuarioId || (carpeta !== null && esPropia(a, carpeta));
+
+/**
+ * Reasignar una audiencia a otro abogado (cubrir a un colega que falta).
+ * Delegar pasa por el titular o por procuración: un abogado no le carga
+ * trabajo a otro, que tendría una audiencia de una carpeta que no puede ver.
+ */
+export const puedeReasignarAudiencia = (a: AuthorizationContext) => esTitular(a) || esAsistente(a);
+
+// ── Equipo ──────────────────────────────────────────────────────────────────
+
+export const puedeAdministrarEquipo = (a: AuthorizationContext) => esTitular(a);
+
+/**
+ * Quién ve al equipo completo: quien asigna trabajo (titular y asistente).
+ * El abogado común no asigna a nadie, así que solo se ve a sí mismo.
+ */
+export const veTodoElEquipo = (a: AuthorizationContext) => !actuaSoloSobreLoPropio(a);
+
+/** Solo un abogado activo del estudio lleva una carpeta o asiste a una audiencia. */
+export async function esAbogadoActivo(db: Database, usuarioId: string, estudioId: string): Promise<boolean> {
+  const [abogado] = await db
+    .select({ id: usuarios.id })
+    .from(usuarios)
+    .innerJoin(usuariosRoles, eq(usuariosRoles.usuarioId, usuarios.id))
+    .innerJoin(roles, eq(roles.id, usuariosRoles.rolId))
+    .where(and(
+      eq(usuarios.id, usuarioId),
+      eq(usuarios.estudioId, estudioId),
+      eq(usuarios.activo, true),
+      eq(roles.codigo, ROLE_CODES.ABOGADO),
+    ))
+    .limit(1);
+  return abogado !== undefined;
+}
+
+// ── Middleware ──────────────────────────────────────────────────────────────
 
 export function sendForbidden(reply: FastifyReply) {
   return reply.status(403).send({ error: "No autorizado" });
 }
 
-export function requireWriteAuthorization(db: Database) {
+/**
+ * Autentica (401) y exige un rol del estudio (403). Si se pasa `allowed`,
+ * además filtra por perfil. Deja el contexto en `request.access`.
+ */
+export function requireAccess(
+  db: Database,
+  allowed?: (a: AuthorizationContext) => boolean,
+) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     const user = await getAuthenticatedUser(request, reply, db);
     if (!user) return;
 
-    const authorization = await loadAuthorization(db, user.id);
-    if (!canWrite(authorization)) {
+    const authorization = await loadAuthorization(db, user);
+    if (authorization.rol === null || (allowed && !allowed(authorization))) {
       return sendForbidden(reply);
     }
 
-    request.writeAuthorization = { user, authorization };
+    request.access = { user, authorization };
   };
 }
 
-export function getWriteAuthorization(request: FastifyRequest): WriteAuthorization {
-  if (!request.writeAuthorization) {
-    throw new Error("Write authorization context is unavailable");
-  }
+/** Solo el titular. */
+export const requireTitular = (db: Database) => requireAccess(db, esTitular);
 
-  return request.writeAuthorization;
+export function getAccess(request: FastifyRequest): Access {
+  if (!request.access) {
+    throw new Error("Access context is unavailable");
+  }
+  return request.access;
 }

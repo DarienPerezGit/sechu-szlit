@@ -1,8 +1,26 @@
 import { useMemo, useState } from "react";
-import { fetchAudienciasRango, fetchCarpetas, vincularAudiencia, type Audiencia } from "../lib/domain";
-import { capitalize, fmtDateLong, fmtHora, toYmd } from "../lib/format";
+import {
+  actualizarAudiencia,
+  fetchAudienciasRango,
+  fetchCarpetas,
+  vincularAudiencia,
+  type Audiencia,
+  type CambiosAudiencia,
+} from "../lib/domain";
+import { alias, capitalize, fmtDateLong, fmtHora, toYmd } from "../lib/format";
 import { AudienciaForm } from "../components/AudienciaForm";
-import { AbogadoTag, ErrorBox, Modal, TipoBadge, errorMessage, useApp, useAsync } from "../components/ui";
+import {
+  AbogadoTag,
+  ErrorBox,
+  Modal,
+  TipoBadge,
+  errorMessage,
+  puedeEditarAudiencia,
+  puedeReasignarAudiencia,
+  puedeVerCarpeta,
+  useApp,
+  useAsync,
+} from "../components/ui";
 import { CarpetaDetalle } from "./CarpetasView";
 
 const DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
@@ -177,10 +195,18 @@ function AudienciaCard({
   onAbrirCarpeta: (id: string) => void;
   onChanged: () => void;
 }) {
-  const { toast } = useApp();
+  const app = useApp();
+  const { toast, equipo } = app;
   const [carpetaId, setCarpetaId] = useState("");
+  const [editando, setEditando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const pendiente = a.estado === "pendiente";
+  const editable = pendiente && puedeEditarAudiencia(app, a);
+  const reasignable = puedeReasignarAudiencia(app);
+  const abreCarpeta = a.carpetaId !== null && puedeVerCarpeta(app, { abogadoResponsableId: a.carpetaAbogadoResponsableId });
+  const responsable = equipo.find((m) => m.id === a.carpetaAbogadoResponsableId);
 
   async function vincular() {
     setSaving(true);
@@ -218,26 +244,134 @@ function AudienciaCard({
         <span className={`estado-badge estado-${a.estado}`}>{a.estado}</span>
       </div>
       {error && <div className="error-box">{error}</div>}
-      <div className="btn-group" style={{ marginTop: 8 }}>
-        {a.carpetaId ? (
-          <button type="button" className="btn-sm" onClick={() => onAbrirCarpeta(a.carpetaId!)}>
-            📂 Abrir carpeta
-          </button>
-        ) : (
-          <>
-            <select aria-label="Carpeta a vincular" value={carpetaId} onChange={(e) => setCarpetaId(e.target.value)} style={{ width: "auto", flex: 1 }}>
-              <option value="">Vincular a carpeta…</option>
-              {carpetas.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.caratula} · {c.expediente}
+      {editando ? (
+        <EditarAudiencia
+          audiencia={a}
+          reasignable={reasignable}
+          onCancel={() => setEditando(false)}
+          onSaved={() => {
+            setEditando(false);
+            onChanged();
+          }}
+        />
+      ) : (
+        <div className="btn-group" style={{ marginTop: 8 }}>
+          {a.carpetaId &&
+            (abreCarpeta ? (
+              <button type="button" className="btn-sm" onClick={() => onAbrirCarpeta(a.carpetaId!)}>
+                📂 Abrir carpeta
+              </button>
+            ) : (
+              <span className="small muted">
+                Cubrís esta audiencia: la carpeta la lleva {responsable ? alias(responsable.email) : "otro abogado"} y
+                solo la abre su responsable.
+              </span>
+            ))}
+          {!a.carpetaId && (
+            <>
+              <select aria-label="Carpeta a vincular" value={carpetaId} onChange={(e) => setCarpetaId(e.target.value)} style={{ width: "auto", flex: 1 }}>
+                <option value="">Vincular a carpeta…</option>
+                {carpetas.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.caratula} · {c.expediente}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="btn-sm primary" disabled={!carpetaId || saving} onClick={vincular}>
+                Vincular
+              </button>
+            </>
+          )}
+          {editable && (
+            <button type="button" className="btn-sm" onClick={() => setEditando(true)}>
+              {reasignable ? "✏️ Reprogramar o reasignar" : "✏️ Reprogramar"}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Reprogramar (fecha, hora, notas) y, para el titular y procuración, reasignar a otro abogado. */
+function EditarAudiencia({
+  audiencia: a,
+  reasignable,
+  onCancel,
+  onSaved,
+}: {
+  audiencia: Audiencia;
+  reasignable: boolean;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const { equipo, toast } = useApp();
+  const abogados = equipo.filter((m) => m.rol === "abogado");
+  const [fecha, setFecha] = useState(a.fecha);
+  const [hora, setHora] = useState(a.hora.slice(0, 5));
+  const [abogadoId, setAbogadoId] = useState(a.abogadoId);
+  const [notas, setNotas] = useState(a.notasInternas ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function guardar() {
+    const cambios: CambiosAudiencia = {};
+    if (fecha !== a.fecha) cambios.fecha = fecha;
+    if (hora !== a.hora.slice(0, 5)) cambios.hora = hora;
+    if (reasignable && abogadoId !== a.abogadoId) cambios.abogadoId = abogadoId;
+    if (notas !== (a.notasInternas ?? "")) cambios.notasInternas = notas || null;
+    if (Object.keys(cambios).length === 0) {
+      onCancel();
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await actualizarAudiencia(a.id, cambios);
+      toast(cambios.abogadoId ? "Audiencia reasignada" : "Audiencia actualizada");
+      onSaved();
+    } catch (err) {
+      setError(errorMessage(err));
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      {error && <div className="error-box">{error}</div>}
+      <div className="form-grid-2">
+        <div className="form-row">
+          <label htmlFor={`ed-fecha-${a.id}`}>Fecha</label>
+          <input id={`ed-fecha-${a.id}`} type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+        </div>
+        <div className="form-row">
+          <label htmlFor={`ed-hora-${a.id}`}>Hora</label>
+          <input id={`ed-hora-${a.id}`} type="time" value={hora} onChange={(e) => setHora(e.target.value)} />
+        </div>
+        {reasignable && (
+          <div className="form-row">
+            <label htmlFor={`ed-abogado-${a.id}`}>Asiste</label>
+            <select id={`ed-abogado-${a.id}`} value={abogadoId} onChange={(e) => setAbogadoId(e.target.value)}>
+              {abogados.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.email}
                 </option>
               ))}
             </select>
-            <button type="button" className="btn-sm primary" disabled={!carpetaId || saving} onClick={vincular}>
-              Vincular
-            </button>
-          </>
+          </div>
         )}
+        <div className="form-row">
+          <label htmlFor={`ed-notas-${a.id}`}>Notas internas</label>
+          <input id={`ed-notas-${a.id}`} type="text" value={notas} onChange={(e) => setNotas(e.target.value)} />
+        </div>
+      </div>
+      <div className="btn-group">
+        <button type="button" className="btn-sm" onClick={onCancel}>
+          Cancelar
+        </button>
+        <button type="button" className="btn-sm primary" disabled={saving || !fecha || !hora} onClick={guardar}>
+          {saving ? "Guardando…" : "Guardar cambios"}
+        </button>
       </div>
     </div>
   );

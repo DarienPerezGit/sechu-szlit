@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { config } from "dotenv";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
-import { readFileSync, readdirSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { Client, Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { dirname, join } from "node:path";
@@ -206,7 +207,7 @@ describe("pnpm db:migrate", () => {
 
     expect(result.status).toBe(0);
     expect((await query(migrationDatabaseUrl, `SELECT count(*)::int AS count FROM "__sechub_migrations"`)).rows[0].count)
-      .toBe(11);
+      .toBe(12);
     expect((await query(runtimeDatabaseUrl, `SELECT to_regclass('__sechub_migrations') AS name`)).rows[0].name)
       .toBeNull();
   });
@@ -254,6 +255,7 @@ describe("pnpm db:migrate", () => {
       "0008_secure_frontend_grants.sql",
       "0009_supabase_user_link.sql",
       "0010_drop_local_auth.sql",
+      "0011_roles_titular_abogado_asistente.sql",
     ]);
     expect((await query(url, `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'usuarios' AND column_name = 'role'`)).rows).toEqual([]);
     expect(records.rows.every((row) => /^[a-f0-9]{64}$/.test(row.sha256))).toBe(true);
@@ -290,7 +292,7 @@ describe("pnpm db:migrate", () => {
     }
   });
 
-  it("adopts the legacy prefix, applies 0007 through 0010, and preserves normalized role data", async () => {
+  it("adopts the legacy prefix, applies 0007 through 0011, and maps the legacy admin to a titular abogado", async () => {
     const url = await createDatabase();
     await applyLegacySchema(url);
     const userId = "00000000-0000-7000-8000-000000000025";
@@ -307,15 +309,17 @@ describe("pnpm db:migrate", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Adopted 7 migration(s).");
-    expect(result.stdout).toContain("Applied 4 migration(s).");
+    expect(result.stdout).toContain("Applied 5 migration(s).");
     expect((await query(url, `SELECT count(*)::int AS count FROM "__sechub_migrations"`)).rows[0].count)
-      .toBe(11);
+      .toBe(12);
     expect((await query(url, `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'usuarios' AND column_name = 'role'`)).rows).toEqual([]);
     expect((await query(url, `
       SELECT ur.usuario_id, r.codigo
       FROM usuarios_roles ur INNER JOIN roles r ON r.id = ur.rol_id
       WHERE ur.usuario_id = $1
-    `, [userId])).rows).toEqual([{ usuario_id: userId, codigo: "admin" }]);
+    `, [userId])).rows).toEqual([{ usuario_id: userId, codigo: "abogado" }]);
+    expect((await query(url, `SELECT es_titular FROM usuarios WHERE id = $1`, [userId])).rows)
+      .toEqual([{ es_titular: true }]);
   });
 
   it("fails clearly and preserves the scalar column when a role code is unknown", async () => {
@@ -341,8 +345,8 @@ describe("pnpm db:migrate", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Adopted 7 migration(s).");
-    expect(result.stdout).toContain("Applied 4 migration(s).");
-    expect((await query(url, `SELECT count(*)::int AS count FROM public."__sechub_migrations"`)).rows[0].count).toBe(11);
+    expect(result.stdout).toContain("Applied 5 migration(s).");
+    expect((await query(url, `SELECT count(*)::int AS count FROM public."__sechub_migrations"`)).rows[0].count).toBe(12);
     expect(await query(url, `SELECT count(*)::int AS count FROM public.estudios`)).toEqual(before);
     expect((await query(url, `SELECT to_regclass('shadow.__sechub_migrations') AS name`)).rows[0].name).toBeNull();
   });
@@ -380,10 +384,10 @@ describe("pnpm db:migrate", () => {
     const url = await createDatabase();
     const results = await Promise.all([invokeMigration(url), invokeMigration(url)]);
     expect(results.map((result) => result.status)).toEqual([0, 0]);
-    expect(results.filter((result) => result.stdout.includes("Applied 11 migration(s)")).length).toBe(1);
+    expect(results.filter((result) => result.stdout.includes("Applied 12 migration(s)")).length).toBe(1);
     expect(results.filter((result) => result.stdout.includes("up to date")).length).toBe(1);
     const records = await query(url, `SELECT count(*)::int AS count FROM "__sechub_migrations"`);
-    expect(records.rows[0].count).toBe(11);
+    expect(records.rows[0].count).toBe(12);
   });
 
   it("serializes concurrent explicit adoption without replaying SQL", async () => {
@@ -403,7 +407,7 @@ describe("pnpm db:migrate", () => {
 
     expect(results.map((result) => result.status)).toEqual([0, 0]);
     expect(results.filter((result) => result.stdout.includes("Adopted 7 migration(s)")).length).toBe(1);
-    expect(results.filter((result) => result.stdout.includes("Applied 4 migration(s)")).length).toBe(1);
+    expect(results.filter((result) => result.stdout.includes("Applied 5 migration(s)")).length).toBe(1);
     expect(results.filter((result) => result.stdout.includes("up to date")).length).toBe(1);
     expect(await query(url, `
       SELECT (SELECT count(*) FROM estudios) AS estudios,
@@ -431,7 +435,7 @@ describe("pnpm db:migrate", () => {
     expect(result.status).toBe(1);
     const records = await query(url, `SELECT count(*)::int AS count FROM "__sechub_migrations"`);
     const tables = await query(url, `SELECT to_regclass('tipos_acta') AS tipos, to_regclass('estados_acta') AS estados`);
-    expect(records.rows[0].count).toBe(10);
+    expect(records.rows[0].count).toBe(11);
     expect(tables.rows[0]).toEqual({ tipos: null, estados: null });
   });
 
@@ -472,5 +476,63 @@ describe("pnpm db:migrate", () => {
       WHERE table_schema = 'public' AND table_name = 'usuarios' AND column_name = 'password_hash'
     `);
     expect(passwordHashCol.rows).toEqual([]);
+  });
+
+  it("0011 converts legacy roles without escalating lectura and assigns every carpeta a responsable", async () => {
+    const url = await createDatabase();
+    const files = readdirSync(migrationDir).filter((f) => f.endsWith(".sql")).sort();
+    const target = "0011_roles_titular_abogado_asistente.sql";
+    // Historia hasta 0010 con el ejecutor real, en una carpeta aparte.
+    const before0011 = mkdtempSync(join(tmpdir(), "sechub-pre-0011-"));
+    for (const file of files.slice(0, files.indexOf(target))) {
+      copyFileSync(join(migrationDir, file), join(before0011, file));
+    }
+    const pool = new Pool({ connectionString: url });
+    const migrateWith = (directory?: string) => runMigrations(drizzle(pool, { schema }), directory);
+    await migrateWith(before0011);
+
+    const usuario = async (email: string, rolesViejos: string[]) => {
+      const { rows: [u] } = await query(url, `
+        INSERT INTO usuarios (email, estudio_id) SELECT $1, id FROM estudios LIMIT 1 RETURNING id
+      `, [email]);
+      for (const rol of rolesViejos) {
+        await query(url, `INSERT INTO usuarios_roles (usuario_id, rol_id) SELECT $1, id FROM roles WHERE codigo = $2`, [u.id, rol]);
+      }
+      return u.id as string;
+    };
+    const titular = await usuario("titular@test.com", ["admin"]);
+    const responsable = await usuario("responsable@test.com", ["responsable_sector"]);
+    const lectura = await usuario("lectura@test.com", ["lectura"]);
+    const mixto = await usuario("mixto@test.com", ["lectura", "responsable_sector"]);
+    for (const expediente of ["EXP-LEGACY-1", "EXP-LEGACY-2"]) {
+      await query(url, `
+        INSERT INTO carpetas (estudio_id, sector_actual_id, estado_caso_id, expediente, caratula, demandada)
+        SELECT e.id, (SELECT id FROM sectores LIMIT 1), (SELECT id FROM estados_caso LIMIT 1), $1, 'Legacy c/ Legacy', 'Legacy S.A.'
+        FROM estudios e LIMIT 1
+      `, [expediente]);
+    }
+
+    try {
+      expect((await migrateWith()).applied).toBe(1);
+    } finally {
+      await pool.end();
+      rmSync(before0011, { recursive: true, force: true });
+    }
+
+    const perfil = async (id: string) => (await query(url, `
+      SELECT u.activo, u.es_titular, r.codigo AS rol
+      FROM usuarios u
+      LEFT JOIN usuarios_roles ur ON ur.usuario_id = u.id
+      LEFT JOIN roles r ON r.id = ur.rol_id
+      WHERE u.id = $1
+    `, [id])).rows;
+    expect(await perfil(titular)).toEqual([{ activo: true, es_titular: true, rol: "abogado" }]);
+    expect(await perfil(responsable)).toEqual([{ activo: true, es_titular: false, rol: "abogado" }]);
+    expect(await perfil(mixto)).toEqual([{ activo: true, es_titular: false, rol: "abogado" }]);
+    // Lectura no pasa a asistente: queda sin rol y desactivado.
+    expect(await perfil(lectura)).toEqual([{ activo: false, es_titular: false, rol: null }]);
+
+    const carpetas = await query(url, `SELECT DISTINCT abogado_responsable_id AS id FROM carpetas`);
+    expect(carpetas.rows).toEqual([{ id: titular }]);
   });
 });

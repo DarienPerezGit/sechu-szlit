@@ -48,11 +48,14 @@ type SectorCodigo = "comunicaciones" | "seclo" | "redaccion" | "procesal" | "acc
 type TipoAudCodigo = "seclo" | "judicial" | "accidente" | "comunicacion" | "mediacion" | "consulta";
 type TipoActaCodigo = "audiencia_conciliatoria" | "pase_segunda_fecha" | "acuerdo" | "desistimiento";
 
+/** Integrantes del equipo de demo (ver packages/db/src/seeds/seed-dev-users.sql). */
+type Miembro = "admin" | "abogado1" | "abogado2";
+
 interface AudienciaDemo {
   fecha: string;
   hora: string;
   tipo: TipoAudCodigo;
-  abogado: "admin" | "viewer";
+  abogado: Miembro;
   notas?: string;
   link?: string;
 }
@@ -61,6 +64,8 @@ interface CarpetaDemo {
   expediente: string;
   demandada: string;
   sector: SectorCodigo;
+  /** Abogado responsable de la carpeta ("admin" es el titular). */
+  responsable: Miembro;
   audiencias: AudienciaDemo[];
   /** Acta que se vincula al cargar (para mostrar historial ya cerrado). */
   cerrarCon?: { tipo: TipoActaCodigo; conciliador: string };
@@ -72,8 +77,9 @@ const CARPETAS: CarpetaDemo[] = [
     expediente: "SECLO 207733/2026",
     demandada: "Textil Norte S.R.L.",
     sector: "seclo",
+    responsable: "abogado1",
     audiencias: [
-      { fecha: dia(3), hora: "10:30", tipo: "seclo", abogado: "admin", notas: "Segunda audiencia. La empresa trae propuesta de pago en cuotas.", link: "https://meet.google.com/abc-defg-hij" },
+      { fecha: dia(3), hora: "10:30", tipo: "seclo", abogado: "abogado1", notas: "Segunda audiencia. La empresa trae propuesta de pago en cuotas.", link: "https://meet.google.com/abc-defg-hij" },
     ],
   },
   {
@@ -81,8 +87,9 @@ const CARPETAS: CarpetaDemo[] = [
     expediente: "SECLO 205120/2026",
     demandada: "Supermercados del Plata S.A.",
     sector: "seclo",
+    responsable: "abogado1",
     audiencias: [
-      { fecha: dia(2), hora: "09:00", tipo: "seclo", abogado: "admin", notas: "Primera audiencia. Reclamo art. 245 LCT + multas ley 25.323." },
+      { fecha: dia(2), hora: "09:00", tipo: "seclo", abogado: "abogado1", notas: "Primera audiencia. Reclamo art. 245 LCT + multas ley 25.323." },
     ],
   },
   {
@@ -90,8 +97,9 @@ const CARPETAS: CarpetaDemo[] = [
     expediente: "CM 44871/2026",
     demandada: "Transportes Ruta 3 S.A.",
     sector: "accidentes",
+    responsable: "abogado2",
     audiencias: [
-      { fecha: dia(5), hora: "11:00", tipo: "accidente", abogado: "viewer", notas: "Comisión Médica 10. Llevar estudios de traumatología." },
+      { fecha: dia(5), hora: "11:00", tipo: "accidente", abogado: "abogado2", notas: "Comisión Médica 10. Llevar estudios de traumatología." },
     ],
   },
   {
@@ -99,6 +107,7 @@ const CARPETAS: CarpetaDemo[] = [
     expediente: "CNT 31877/2026",
     demandada: "Metalúrgica Avellaneda S.A.",
     sector: "procesal",
+    responsable: "admin",
     audiencias: [
       { fecha: dia(8), hora: "12:00", tipo: "judicial", abogado: "admin", notas: "Juzgado Nacional del Trabajo N° 45. Audiencia art. 80 LO." },
     ],
@@ -108,8 +117,9 @@ const CARPETAS: CarpetaDemo[] = [
     expediente: "COM 0921/2026",
     demandada: "Clínica San Jorge S.A.",
     sector: "comunicaciones",
+    responsable: "abogado2",
     audiencias: [
-      { fecha: dia(1), hora: "16:00", tipo: "comunicacion", abogado: "viewer", notas: "Entrevista inicial. Traer recibos y telegramas." },
+      { fecha: dia(1), hora: "16:00", tipo: "comunicacion", abogado: "abogado2", notas: "Entrevista inicial. Traer recibos y telegramas." },
     ],
   },
   {
@@ -117,6 +127,7 @@ const CARPETAS: CarpetaDemo[] = [
     expediente: "SECLO 199402/2026",
     demandada: "Call Center Sur S.A.",
     sector: "redaccion",
+    responsable: "abogado1",
     audiencias: [],
   },
   {
@@ -124,8 +135,9 @@ const CARPETAS: CarpetaDemo[] = [
     expediente: "MED 7731/2026",
     demandada: "Consorcio Av. Rivadavia 4500",
     sector: "mediaciones_civiles",
+    responsable: "abogado2",
     audiencias: [
-      { fecha: dia(6), hora: "15:00", tipo: "mediacion", abogado: "viewer", notas: "Mediación prejudicial obligatoria." },
+      { fecha: dia(6), hora: "15:00", tipo: "mediacion", abogado: "abogado2", notas: "Mediación prejudicial obligatoria." },
     ],
   },
   {
@@ -133,6 +145,7 @@ const CARPETAS: CarpetaDemo[] = [
     expediente: "SECLO 201566/2026",
     demandada: "Distribuidora Oeste S.A.",
     sector: "seclo",
+    responsable: "admin",
     audiencias: [{ fecha: dia(-9), hora: "10:00", tipo: "seclo", abogado: "admin", notas: "El trabajador desiste del reclamo." }],
     cerrarCon: { tipo: "desistimiento", conciliador: "Dr. Raúl Pereyra" },
   },
@@ -141,7 +154,8 @@ const CARPETAS: CarpetaDemo[] = [
     expediente: "SECLO 198870/2026",
     demandada: "Logística Pampeana S.R.L.",
     sector: "seclo",
-    audiencias: [{ fecha: dia(-6), hora: "11:30", tipo: "seclo", abogado: "admin", notas: "Acuerdo por indemnización completa en 3 cuotas." }],
+    responsable: "abogado1",
+    audiencias: [{ fecha: dia(-6), hora: "11:30", tipo: "seclo", abogado: "abogado1", notas: "Acuerdo por indemnización completa en 3 cuotas." }],
     cerrarCon: { tipo: "acuerdo", conciliador: "Dra. Silvia Romero" },
   },
 ];
@@ -201,10 +215,23 @@ async function main() {
     return item.id;
   };
   const equipo = await api<{ id: string; email: string }[]>("/equipo");
-  const abogado = (who: "admin" | "viewer") =>
-    (equipo.find((m) => m.email.startsWith(who)) ?? equipo[0]).id;
+  const abogado = (who: Miembro) =>
+    (equipo.find((m) => m.email.startsWith(`${who}@`)) ?? equipo.find((m) => m.email.startsWith("admin@")) ?? equipo[0]).id;
 
-  const existentes = new Set((await api<{ expediente: string }[]>("/carpetas")).map((c) => c.expediente));
+  type Existente = { id: string; expediente: string; version: number; abogadoResponsableId: string };
+  const previas = await api<Existente[]>("/carpetas");
+  const existentes = new Set(previas.map((c) => c.expediente));
+
+  // Carpetas cargadas antes del modelo por abogado: se reparten entre el equipo.
+  for (const c of CARPETAS) {
+    const previa = previas.find((p) => p.expediente === c.expediente);
+    if (!previa || previa.abogadoResponsableId === abogado(c.responsable)) continue;
+    await api(`/carpetas/${previa.id}`, {
+      method: "PATCH",
+      body: { version: previa.version, abogadoResponsableId: abogado(c.responsable) },
+    });
+    console.log(`  ↻ ${c.expediente} → ${c.responsable}`);
+  }
   let creadas = 0;
 
   const crearAudiencia = (a: AudienciaDemo, carpetaId: string | null) =>
@@ -234,6 +261,7 @@ async function main() {
         demandada: c.demandada,
         sectorActualId: byCode(cat.sectores, c.sector),
         estadoCasoId: byCode(cat.estadosCaso, "en_tramite"),
+        abogadoResponsableId: abogado(c.responsable),
       },
     });
     const audienciaIds: string[] = [];

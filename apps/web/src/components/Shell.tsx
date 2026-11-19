@@ -4,23 +4,32 @@ import { fetchCatalogos, fetchEquipo } from "../lib/domain";
 import { ActasView } from "../views/ActasView";
 import { CalendarioView } from "../views/CalendarioView";
 import { CarpetasView } from "../views/CarpetasView";
-import { AppContext, ErrorBox, Loading, useAsync, useToast } from "./ui";
+import { EquipoView } from "../views/EquipoView";
+import { InicioView } from "../views/InicioView";
+import { AppContext, ErrorBox, Loading, PERFIL_LABEL, useAsync, useToast } from "./ui";
 
 const TABS = [
+  { id: "inicio", label: "🏠 Inicio" },
   { id: "carpetas", label: "📁 Carpetas" },
   { id: "calendario", label: "📅 Calendario" },
   { id: "actas", label: "📋 Actas" },
+  { id: "equipo", label: "👥 Equipo" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
 export function Shell({ user, onLogout }: { user: MeUser; onLogout: () => void }) {
-  const [tab, setTab] = useState<TabId>("carpetas");
+  const [tab, setTab] = useState<TabId>("inicio");
+  // Equipo es la administración del estudio: solo para el titular.
+  const tabs = TABS.filter((t) => t.id !== "equipo" || user.perfil === "titular");
   const [toastMessage, toast] = useToast();
   const base = useAsync(() => Promise.all([fetchCatalogos(), fetchEquipo()]), []);
 
   const ctx = useMemo(
-    () => (base.data ? { catalogos: base.data[0], equipo: base.data[1], userId: user.id, toast } : null),
-    [base.data, user.id, toast],
+    () =>
+      base.data
+        ? { catalogos: base.data[0], equipo: base.data[1], userId: user.id, perfil: user.perfil, toast }
+        : null,
+    [base.data, user.id, user.perfil, toast],
   );
 
   return (
@@ -34,11 +43,11 @@ export function Shell({ user, onLogout }: { user: MeUser; onLogout: () => void }
             <h1>SECHUB · Estudio Szlit</h1>
             <p>
               {user.email}{" "}
-              {user.roles.map((role) => (
-                <span key={role} className="badge info">
-                  {role}
-                </span>
-              ))}
+              {user.perfil ? (
+                <span className="badge info">{PERFIL_LABEL[user.perfil]}</span>
+              ) : (
+                <span className="badge">Sin rol asignado</span>
+              )}
             </p>
           </div>
         </div>
@@ -50,7 +59,7 @@ export function Shell({ user, onLogout }: { user: MeUser; onLogout: () => void }
       </header>
 
       <nav className="tabs" role="tablist">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.id}
             type="button"
@@ -68,9 +77,11 @@ export function Shell({ user, onLogout }: { user: MeUser; onLogout: () => void }
       {!ctx && !base.error && <Loading />}
       {ctx && (
         <AppContext.Provider value={ctx}>
+          {tab === "inicio" && <InicioView irA={setTab} />}
           {tab === "carpetas" && <CarpetasView />}
           {tab === "calendario" && <CalendarioView />}
           {tab === "actas" && <ActasView />}
+          {tab === "equipo" && user.perfil === "titular" && <EquipoView />}
         </AppContext.Provider>
       )}
 

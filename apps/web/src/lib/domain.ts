@@ -24,7 +24,13 @@ export interface Catalogos {
 export interface MiembroEquipo {
   id: string;
   email: string;
+  rol: "abogado" | "asistente" | null;
+  esTitular: boolean;
+  activo?: boolean;
 }
+
+/** Perfil resuelto por la API: el titular es un abogado con permiso extra. */
+export type Perfil = "titular" | "abogado" | "asistente";
 
 /* ---------- Dominio ---------- */
 
@@ -37,6 +43,7 @@ export interface Carpeta {
   caratula: string;
   demandada: string;
   empleadorId: string | null;
+  abogadoResponsableId: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -57,6 +64,8 @@ export interface Audiencia {
   /** Solo en agenda/calendario (join con la carpeta). */
   caratula?: string | null;
   expediente?: string | null;
+  /** Responsable de la carpeta: decide si quien asiste puede abrirla. */
+  carpetaAbogadoResponsableId?: string | null;
 }
 
 export interface BitacoraEntry {
@@ -121,6 +130,7 @@ export interface NuevaCarpeta {
   expediente: string;
   caratula: string;
   demandada: string;
+  abogadoResponsableId?: string;
 }
 export const crearCarpeta = (body: NuevaCarpeta) =>
   apiFetch<Carpeta>("/api/carpetas", { method: "POST", ...json(body) });
@@ -141,6 +151,35 @@ export interface NuevaAudiencia {
 }
 export const crearAudiencia = (body: NuevaAudiencia) =>
   apiFetch<Audiencia>("/api/audiencias", { method: "POST", ...json(body) });
+
+export interface CambiosAudiencia {
+  abogadoId?: string;
+  fecha?: string;
+  hora?: string;
+  notasInternas?: string | null;
+  linkReunion?: string | null;
+}
+export const actualizarAudiencia = (id: string, body: CambiosAudiencia) =>
+  apiFetch<Audiencia>(`/api/audiencias/${id}`, { method: "PATCH", ...json(body) });
+
+/* ---------- Equipo (administración: solo el titular) ---------- */
+
+export const fetchEquipoCompleto = async () =>
+  asArray<MiembroEquipo>(await apiFetch("/api/equipo?incluirInactivos=true"));
+
+export interface NuevoIntegrante {
+  email: string;
+  password: string;
+  rol: "abogado" | "asistente";
+  esTitular: boolean;
+}
+export const crearIntegrante = (body: NuevoIntegrante) =>
+  apiFetch<MiembroEquipo>("/api/equipo", { method: "POST", ...json(body) });
+
+export const actualizarIntegrante = (
+  id: string,
+  body: Partial<{ rol: "abogado" | "asistente"; esTitular: boolean; activo: boolean }>,
+) => apiFetch<MiembroEquipo>(`/api/equipo/${id}`, { method: "PATCH", ...json(body) });
 
 export const vincularAudiencia = (id: string, carpetaId: string) =>
   apiFetch(`/api/audiencias/${id}/vincular`, { method: "PATCH", ...json({ carpetaId }) });

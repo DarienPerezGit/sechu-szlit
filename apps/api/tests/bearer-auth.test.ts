@@ -149,7 +149,7 @@ describe("Issue #29: Bearer Supabase authentication & dynamic authorization", as
       email: "active@sechub.test",
       supabaseUserId: supabaseUid,
       activo: true,
-      role: ROLE_CODES.ADMIN,
+      role: ROLE_CODES.ABOGADO,
     });
 
     const mockSupabase = createMockSupabase(async (token) => {
@@ -180,7 +180,7 @@ describe("Issue #29: Bearer Supabase authentication & dynamic authorization", as
       email: "dynamic@sechub.test",
       supabaseUserId: supabaseUid,
       activo: true,
-      role: ROLE_CODES.LECTURA, // Read-only initially
+      role: ROLE_CODES.ASISTENTE, // El asistente no abre expedientes
     });
 
     const mockSupabase = createMockSupabase(async () => ({
@@ -191,7 +191,7 @@ describe("Issue #29: Bearer Supabase authentication & dynamic authorization", as
     const app = await createApp(mockSupabase);
     const headers = { authorization: "Bearer valid-dynamic-token" };
 
-    // Request 1: Attempt write operation (POST /carpetas) as LECTURA -> 403 Forbidden
+    // Request 1: el asistente intenta abrir una carpeta -> 403 Forbidden
     const createPayload = {
       sectorActualId: 1,
       estadoCasoId: 1,
@@ -209,13 +209,13 @@ describe("Issue #29: Bearer Supabase authentication & dynamic authorization", as
     expect(firstRes.statusCode).toBe(403);
     expect(firstRes.json()).toEqual({ error: "No autorizado" });
 
-    // Promote user dynamically in PostgreSQL: replace LECTURA with ADMIN in usuarios_roles
+    // Cambio de rol en PostgreSQL: de asistente a abogado
     await db.execute(sql`
       DELETE FROM usuarios_roles WHERE usuario_id = ${user.id}
     `);
     await db.execute(sql`
       INSERT INTO usuarios_roles (usuario_id, rol_id)
-      SELECT ${user.id}, roles.id FROM roles WHERE codigo = ${ROLE_CODES.ADMIN}
+      SELECT ${user.id}, roles.id FROM roles WHERE codigo = ${ROLE_CODES.ABOGADO}
     `);
 
     // Request 2: Exactly the same request, next turn -> 201 Created (no server restart)
@@ -239,7 +239,8 @@ describe("Issue #29: Bearer Supabase authentication & dynamic authorization", as
       email: "me@sechub.test",
       supabaseUserId: supabaseUid,
       activo: true,
-      role: ROLE_CODES.RESPONSABLE_SECTOR,
+      role: ROLE_CODES.ABOGADO,
+      esTitular: false,
     });
 
     const mockSupabase = createMockSupabase(async () => ({
@@ -258,6 +259,7 @@ describe("Issue #29: Bearer Supabase authentication & dynamic authorization", as
     const body = response.json();
     expect(body.user.id).toBe(user.id);
     expect(body.user.email).toBe("me@sechub.test");
-    expect(body.user.roles).toContain(ROLE_CODES.RESPONSABLE_SECTOR);
+    expect(body.user.roles).toEqual([ROLE_CODES.ABOGADO]);
+    expect(body.user.perfil).toBe("abogado");
   });
 });

@@ -6,14 +6,22 @@ import {
   carpetas,
   bitacoraCarpetas,
   empleadores,
+  ROLE_CODES,
+  roles,
   tiposAudiencia,
   usuarios,
+  usuariosRoles,
 } from "@sechub/db";
-import { getAuthenticatedUser, UUID_REGEX, PG_UNIQUE_VIOLATION } from "../utils/auth.js";
+import { UUID_REGEX, PG_UNIQUE_VIOLATION } from "../utils/auth.js";
 import {
-  canWriteSector,
-  getWriteAuthorization,
-  requireWriteAuthorization,
+  carpetasVisibles,
+  esAbogado,
+  getAccess,
+  puedeAsignarAbogado,
+  puedeCrearCarpeta,
+  puedeEditarCarpeta,
+  puedeVerCarpeta,
+  requireAccess,
   sendForbidden,
 } from "../authorization.js";
 
@@ -47,6 +55,41 @@ async function checkEmpleadorOwnership(
 
   if (!empleador) {
     reply.status(400).send({ error: "El empleador especificado no existe o no pertenece a su estudio" });
+    return false;
+  }
+
+  return true;
+}
+
+/** El abogado responsable debe ser un abogado activo del mismo estudio. */
+async function checkAbogadoResponsable(
+  db: Database,
+  abogadoId: string,
+  estudioId: string,
+  reply: FastifyReply,
+): Promise<boolean> {
+  if (!UUID_REGEX.test(abogadoId)) {
+    reply.status(400).send({ error: "ID de abogado responsable inválido" });
+    return false;
+  }
+
+  const [abogado] = await db
+    .select({ id: usuarios.id })
+    .from(usuarios)
+    .innerJoin(usuariosRoles, eq(usuariosRoles.usuarioId, usuarios.id))
+    .innerJoin(roles, eq(roles.id, usuariosRoles.rolId))
+    .where(
+      and(
+        eq(usuarios.id, abogadoId),
+        eq(usuarios.estudioId, estudioId),
+        eq(usuarios.activo, true),
+        eq(roles.codigo, ROLE_CODES.ABOGADO),
+      ),
+    )
+    .limit(1);
+
+  if (!abogado) {
+    reply.status(400).send({ error: "El abogado responsable no existe, no está activo o no es abogado del estudio" });
     return false;
   }
 
@@ -89,22 +132,20 @@ export async function carpetasRoutes(
   const { db } = opts;
 
   // GET /api/carpetas
-  app.get("/carpetas", async (request, reply) => {
-    const user = await getAuthenticatedUser(request, reply, db);
-    if (!user) return;
+  app.get("/carpetas", { preValidation: requireAccess(db) }, async (request, reply) => {
+    const { user, authorization } = getAccess(request);
 
     const data = await db
       .select()
       .from(carpetas)
-      .where(eq(carpetas.estudioId, user.estudioId));
+      .where(and(eq(carpetas.estudioId, user.estudioId), carpetasVisibles(authorization)));
 
     return reply.status(200).send(data);
   });
 
   // GET /api/carpetas/:id
-  app.get<{ Params: { id: string } }>("/carpetas/:id", async (request, reply) => {
-    const user = await getAuthenticatedUser(request, reply, db);
-    if (!user) return;
+  app.get<{ Params: { id: string } }>("/carpetas/:id", { preValidation: requireAccess(db) }, async (request, reply) => {
+    const { user, authorization } = getAccess(request);
 
     const { id } = request.params;
     if (!UUID_REGEX.test(id)) {
@@ -120,17 +161,20 @@ export async function carpetasRoutes(
     if (!carpeta) {
       return reply.status(404).send({ error: "Carpeta no encontrada" });
     }
+    if (!puedeVerCarpeta(authorization, carpeta)) {
+      return sendForbidden(reply);
+    }
 
     return reply.status(200).send(carpeta);
   });
 
   // GET /api/carpetas/:id/audiencias — audiencias vinculadas, cronológicas
-  app.get<{ Params: { id: string } }>("/carpetas/:id/audiencias", async (request, reply) => {
-    const user = await getAuthenticatedUser(request, reply, db);
-    if (!user) return;
+  app.get<{ Params: { id: string } }>("/carpetas/:id/audiencias", { preValidation: requireAccess(db) }, async (request, reply) => {
+    const { user, authorization } = getAccess(request);
 
     const carpeta = await findCarpeta(db, request.params.id, user.estudioId, reply);
     if (!carpeta) return;
+    if (!puedeVerCarpeta(authorization, carpeta)) return sendForbidden(reply);
 
     const data = await db
       .select({
@@ -157,12 +201,12 @@ export async function carpetasRoutes(
   });
 
   // GET /api/carpetas/:id/bitacora — historial, más reciente primero
-  app.get<{ Params: { id: string } }>("/carpetas/:id/bitacora", async (request, reply) => {
-    const user = await getAuthenticatedUser(request, reply, db);
-    if (!user) return;
+  app.get<{ Params: { id: string } }>("/carpetas/:id/bitacora", { preValidation: requireAccess(db) }, async (request, reply) => {
+    const { user, authorization } = getAccess(request);
 
     const carpeta = await findCarpeta(db, request.params.id, user.estudioId, reply);
     if (!carpeta) return;
+    if (!puedeVerCarpeta(authorization, carpeta)) return sendForbidden(reply);
 
     const data = await db
       .select({
@@ -189,9 +233,10 @@ export async function carpetasRoutes(
       caratula: string;
       demandada: string;
       empleadorId?: string | null;
+      abogadoResponsableId?: string;
     };
   }>("/carpetas", {
-    preValidation: requireWriteAuthorization(db),
+    preValidation: requireAccess(db, puedeCrearCarpeta),
     schema: {
       body: {
         type: "object",
@@ -203,13 +248,18 @@ export async function carpetasRoutes(
           caratula: { type: "string" },
           demandada: { type: "string" },
           empleadorId: { type: ["string", "null"] },
+          abogadoResponsableId: { type: "string" },
         },
       },
     },
   }, async (request, reply) => {
-    const { user, authorization } = getWriteAuthorization(request);
+    const { user, authorization } = getAccess(request);
     const { sectorActualId, estadoCasoId, expediente, caratula, demandada, empleadorId } = request.body;
-    if (!canWriteSector(authorization, sectorActualId)) {
+    // Por defecto, quien abre el expediente queda como responsable.
+    const abogadoResponsableId = request.body.abogadoResponsableId ?? user.id;
+
+    if (!(await checkAbogadoResponsable(db, abogadoResponsableId, user.estudioId, reply))) return;
+    if (!puedeAsignarAbogado(authorization, abogadoResponsableId)) {
       return sendForbidden(reply);
     }
 
@@ -228,6 +278,7 @@ export async function carpetasRoutes(
             caratula,
             demandada,
             empleadorId: empleadorId || null,
+            abogadoResponsableId,
           })
           .returning();
 
@@ -260,9 +311,10 @@ export async function carpetasRoutes(
       caratula?: string;
       demandada?: string;
       empleadorId?: string | null;
+      abogadoResponsableId?: string;
     };
   }>("/carpetas/:id", {
-    preValidation: requireWriteAuthorization(db),
+    preValidation: requireAccess(db, esAbogado),
     schema: {
       body: {
         type: "object",
@@ -275,17 +327,18 @@ export async function carpetasRoutes(
           caratula: { type: "string" },
           demandada: { type: "string" },
           empleadorId: { type: ["string", "null"] },
+          abogadoResponsableId: { type: "string" },
         },
       },
     },
   }, async (request, reply) => {
-    const { user, authorization } = getWriteAuthorization(request);
+    const { user, authorization } = getAccess(request);
     const { id } = request.params;
     if (!UUID_REGEX.test(id)) {
       return reply.status(400).send({ error: "ID inválido" });
     }
 
-    const { version, sectorActualId, estadoCasoId, expediente, caratula, demandada, empleadorId } = request.body;
+    const { version, sectorActualId, estadoCasoId, expediente, caratula, demandada, empleadorId, abogadoResponsableId } = request.body;
 
     // Prevent mass assignment: construct sanitized update fields
     const updateFields: any = {};
@@ -295,6 +348,7 @@ export async function carpetasRoutes(
     if (caratula !== undefined) updateFields.caratula = caratula;
     if (demandada !== undefined) updateFields.demandada = demandada;
     if (empleadorId !== undefined) updateFields.empleadorId = empleadorId;
+    if (abogadoResponsableId !== undefined) updateFields.abogadoResponsableId = abogadoResponsableId;
 
     const [existing] = await db
       .select()
@@ -306,8 +360,15 @@ export async function carpetasRoutes(
       return reply.status(404).send({ error: "Carpeta no encontrada" });
     }
 
-    if (!canWriteSector(authorization, existing.sectorActualId)) {
+    if (!puedeEditarCarpeta(authorization, existing)) {
       return sendForbidden(reply);
+    }
+
+    if (abogadoResponsableId !== undefined && abogadoResponsableId !== existing.abogadoResponsableId) {
+      if (!(await checkAbogadoResponsable(db, abogadoResponsableId, user.estudioId, reply))) return;
+      if (!puedeAsignarAbogado(authorization, abogadoResponsableId)) {
+        return sendForbidden(reply);
+      }
     }
 
     const hasOwnership = await checkEmpleadorOwnership(db, empleadorId, user.estudioId, reply);
